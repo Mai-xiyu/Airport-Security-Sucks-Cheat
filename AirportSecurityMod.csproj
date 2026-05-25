@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="scratch\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="6.0.0-be.755" />
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.755" />
+    <PackageReference Include="HarmonyX" Version="2.16.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>lib\Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>lib\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>lib\Il2Cppmscorlib.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>lib\UnityEngine.InputLegacyModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>lib\UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="Mirror">
+      <HintPath>lib\Mirror.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>lib\UnityEngine.TextRenderingModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>lib\UnityEngine.PhysicsModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(OS)' == 'Windows_NT'">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="d:\Steam\steamapps\common\Airport Security Sucks! Demo\BepInEx\plugins\" />
+  </Target>
+</Project>

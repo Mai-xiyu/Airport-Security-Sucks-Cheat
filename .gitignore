@@ -1,0 +1,13 @@
+# dotnet build output
+bin/
+obj/
+
+# User-specific files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Ignore scratch files
+scratch/

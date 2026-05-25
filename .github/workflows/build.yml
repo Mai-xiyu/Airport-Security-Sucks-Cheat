@@ -1,0 +1,53 @@
+name: Build and Release Mod
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '6.0.x'
+
+    - name: Restore NuGet packages
+      run: dotnet restore
+
+    - name: Build Project (Release)
+      run: dotnet build -c Release --no-restore
+
+    - name: Prepare Release Directory
+      run: |
+        mkdir -p publish/BepInEx/plugins
+        cp bin/Release/net6.0/AirportSecurityMod.dll publish/BepInEx/plugins/
+        cd publish
+        zip -r ../AirportSecurityMod.zip BepInEx
+        cd ..
+
+    - name: Create Release and Upload Asset
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: AirportSecurityMod.zip
+        body: |
+          ### Airport Security Sucks! - Super Hack Mod Release
+          
+          **Installation:**
+          1. Download the `AirportSecurityMod.zip` file below.
+          2. Extract the contents directly into the game's root directory (where the game `.exe` is located).
+          3. This will merge the `BepInEx` folder and place `AirportSecurityMod.dll` into `BepInEx/plugins/`.
+          4. Start the game! Press `Insert` to open the mod menu, `F1` to toggle flying.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
