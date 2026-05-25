@@ -1,78 +1,61 @@
-# Airport Security Sucks! - Super Hack (超神多功能辅助)
+# Airport Security Sucks Cheat
 
-本模组是为《Airport Security Sucks!》Demo版开发的高级功能性辅助与恶搞插件，基于 BepInEx 6 (IL2CPP) 框架与 Harmony 补丁技术构建。界面采用精心优化排版的原生 IMGui UI 风格，布局美观、空间开阔、不易发生控件遮挡。
+基于 BepInEx 6 (IL2CPP) 框架与 Harmony 补丁构建的《Airport Security Sucks!》Demo 辅助工具。
 
----
+## 功能特性
 
-## ⚡ 功能一览
+### 1. 移动与物理控制 (Movement & Physics)
+* **飞行穿墙 (Noclip)**: 绕过 CharacterController 的坐标碰撞限制，支持无级调节飞行速度。
+* **移动速度 (Speed Hack)**: 劫持 `MetaPlayerConfig.walkSpeed` 和 `MetaPlayerConfig.sprintSpeed` 的 Getter，按配置倍率缩放人物移速。
+* **超级跳跃 (Super Jump)**: 劫持 `nominalJumpHeight` 实现跳跃高度自定义。
 
-### 1. 战斗与移动 (COMBAT)
-* **飞行穿墙 (Noclip) [F1]**：自由穿墙飞行，可无级调整飞行速度（2m/s ~ 40m/s）。
-* **移速修改**：自定义调整跑动与走动的移动速度倍率（1x ~ 6x）。
-* **超级跳跃**：大幅增加跳跃高度倍率（1x ~ 6x），可开启引力消除配合飞行。
+### 2. 视觉辅助 (Visuals)
+* **玩家透视 (Player ESP)**: 绘制绿色 bounding box，展示名称及距离。
+* **违禁品透视 (Contraband ESP)**: 绘制红色 bounding box，并可强制开启违禁品 `Outline` 组件渲染。
+* **射线辅助 (Tracers)**: 从屏幕中下方向目标绘制引导线。
 
-### 2. 视觉透视 (VISUAL)
-* **透视玩家 (Player ESP)**：绿色框线透视全场在线玩家，显示玩家名称与实时距离。
-* **透视违禁品 (Contraband ESP)**：红色框线标记关卡内所有的违禁物品与位置。
-* **ESP 方框 / 射线**：支持自定义开关透视骨骼方框与地面指向射线。
-* **距离过滤器**：支持滑动或按键调节透视最大距离（20m ~ 500m）。
-* **玩家状态面板**：实时查看房间内所有玩家的名字、金钱数额。
-  * **远程瞬移**：直接传送到指定玩家头顶。
-  * **伪装玩家**：一键窃取并伪装成对方的 Steam 名称与局内同步名称。
+### 3. 网络实体控制与生成 (Network & Spawner)
+* **载具控制 (Segway Control)**:
+  * 远程上车 (`CmdInteract`)
+  * 强制弹射 (`CmdDismount`)
+  * 触发载具爆炸力场 (`RpcExplosionForce`)
+  * 触发载具崩溃 (`RpcCrash`)
+  * 鸣笛 (`CmdBeep`)
+* **玩家状态修改**:
+  * 一键获取 $1,000,000（修改本地 `syncedMoney` 变量，并使用 `CmdSetMoney` 同步）。
+  * 局内玩家改名（通过 `CmdSetPlayerName`）。
+  * 修改历史胜场 (`CmdSetLifetimeWins`)。
+* **全局控制**:
+  * 触发警察或走私者胜利 RPC 封包。
+  * 强制开始游戏或重置返回大厅。
+* **NPC 生成**:
+  * 房主状态下直接调用 `NpcManager.ServerInstance.ServerSpawnNpc` 权威生成。
+  * 客机状态下通过 `CmdDevSpawnInteractable` 绕过权限申请生成。
+* **交互物控制**:
+  * 远程互动并释放警犬笼 (`DogCageInteractable.CmdInteract`)。
+  * 远程触发自动贩卖机出货 (`VendingMachineInteractable`)。
+  * 远程触发愿望单看板 (`WishlistInteractable`)。
 
-### 3. 世界互动 (WORLD)
-* **释放所有警犬**：一键远程破解并打开场景内所有的警犬笼，放出警犬。
-* **贩卖机强制出货**：一键让地图里所有的自动贩卖机远程狂喷可乐/功能饮料。
-* **互动愿望单板**：远程直接触发所有愿望单板的交互状态。
-* **生娃 (生成NPC)**：
-  * *主机模式*：调用官方底层 NpcManager 瞬间生成一个完全具备寻路逻辑的乘客 NPC。
-  * *客机模式*：自动扫描网络 Prefabs，直接在本地并向服务器申请生成一个乘客实体。
-* **实体生成器（限主机）**：提供高级 Prefab 过滤器与分页，可生成游戏中几乎所有的网络物体。
+### 4. 逮捕绕过与栽赃 (Arrest & Scapegoating)
+* **防踢机制**: Harmony 拦截 `SteamMatchmakingTest.OnLobbyKicked` 阻断自动退房。
+* **栽赃逮捕 (Jail & Scapegoat)**:
+  在调用 `CmdArrest` 封包前，提取房间内其他玩家的 Steam 名字并临时修改本地 `playerName`，待封包发出后复原。使服务器判定逮捕动作者为被栽赃玩家。
 
-### 4. 载具控制 (VEHICLES)
-* **生成平衡车**：直接在面前生成一辆平衡车（Segway）。
-* **远程上车 (Mount)**：在任意距离强行骑上指定的平衡车。
-* **弹射骑手 (Eject)**：一键把骑在这辆平衡车上的玩家弹射到万米高空。
-* **自爆 (Explode)**：触发载具爆炸 RPC，产生极强的范围击飞物理冲击。
-* **崩溃 (Crash)** / **鸣笛 (Beep)** / **销毁 (Destroy)** / **传送 (Teleport)**。
-* **吸车到我 (Bring)**：将平衡车直接吸附并强制移动到自己身前（限主机）。
+### 5. 秒退补丁 (Process Exit Patch)
+* 挂钩 `UnityEngine.Application.Quit` 并在拦截后执行 `GetCurrentProcess().Kill()`，避免 conhost/Steamworks API 同步锁死导致 Steam 持续显示游戏在运行的 Bug。
 
-### 5. 恶搞与联机 (TROLL & ONLINE)
-* **极速随机乱码改名**：每 150ms 自动修改您的名字为随机字符，令他人极难在踢人列表中选中您。
-* **超级防踢 (Kick Bypass)**：直接挂钩并拦截 Steam Matchmaking 踢人事件，阻断被退房逻辑。
-* **栽赃监禁 (Jail & Scapegoat)**：
-  * **栽赃替罪羊机制**：在实施逮捕/监禁前，插件会自动从房间内随机挑选除你与目标外的另一名无辜玩家，临时将你的名字改为他的名字并发送 `CmdArrest` 关押数据包，接着迅速改回原名。**这样全场广播和监狱提示会显示“被 [无辜玩家名] 关押”，完美金蝉脱壳！**
-* **客机物理拉人 (Physics Pull)**：在非主机状态下由于坐标限制无法直接拉人，本模组会自动依据距离计算一条抛物线击飞冲量，通过 `PlayerTackle` 强行将对方从极远处直接“扑飞”到你身边！
-* **远程扑倒 (Tackle)** / **强制放倒 (Ragdoll)** / **强制自爆 (Explode)** / **强退 (Give Up)**。
-* **金币与胜场修改**：一键获取 $1,000,000，或输入指定金额加给自己或全场。直接设定胜场。
-* **播放全房放屁声 (Fart)**：向服务器申请在自己的屁屁存储器上发包，给全房间广播超大声的 fart 音效。
-* **大厅状态强控制（限主机）**：强制开启游戏、切换游戏模式、强行重置返回大厅。
+## 安装说明
 
-### 6. 进程秒退补丁 (Process Exit Patch)
-* 挂钩 `UnityEngine.Application.Quit` 事件，当您在游戏内点击退出或关闭窗口时，立即调用系统底层强杀进程。
-* **解决痛点**：彻底解决因 Unity 异常死锁或 BepInEx 后台线程挂起导致的 **“游戏关闭了但 Steam 仍然显示‘正在运行中’”** 的常见 Bug。
+1. 下载 Release 页面发布的 `AirportSecurityMod.zip`。
+2. 解压压缩包内容至游戏根目录（与 `Airport Security Sucks!.exe` 同级）。
+3. 启动游戏，按 `Insert` 键打开/关闭控制菜单，按 `F1` 切换穿墙飞行。
 
----
+## 编译指南
 
-## 💾 安装方法
-
-我们配置了全自动的 GitHub Release 打包流程，您只需按照以下步骤即可使用：
-
-1. 前往本仓库的 [Releases](https://github.com/Mai-xiyu/Airport-Security-Sucks-Cheat/releases) 页面下载最新的 `AirportSecurityMod.zip` 压缩包。
-2. 将压缩包直接解压到您的**游戏根目录**（即包含 `Airport Security Sucks!.exe` 文件的文件夹）。
-3. 压缩包内自带正确的文件夹层级，解压后会自动将 `AirportSecurityMod.dll` 放置于 `BepInEx/plugins/` 目录中。
-4. 启动游戏。在游戏内按下 **`Insert`** 键呼出/隐藏菜单。
-
----
-
-## 🛠️ 编译与开发
-
-如果您希望自行修改并编译代码：
-
-* **环境要求**：.NET 6.0 SDK。
-* 本项目已将依赖的 Unity/Mirror/BepInEx Interop 程序集整理至 `lib/` 文件夹，您可以直接开箱即用编译，无需在本地提取或安装游戏。
-* **本地编译**：
+* **环境需求**: .NET 6.0 SDK。
+* 依赖的程序集已内置于 `lib/` 文件夹中。
+* 执行编译:
   ```bash
   dotnet build -c Release
   ```
-* **自动部署**：如果您在本地进行调试，可以在 Windows 环境下在 `AirportSecurityMod.csproj` 中修改您的游戏安装路径，编译后会自动将 DLL 拷贝至您的游戏插件文件夹中。
+  在 Windows 环境下编译会自动将生成的 DLL 拷贝至游戏对应的 `BepInEx/plugins/` 目录。
