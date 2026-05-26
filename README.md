@@ -27,7 +27,7 @@
   * 修改历史胜场 (`CmdSetLifetimeWins`)。
 * **全局控制**:
   * 触发警察或走私者胜利 RPC 封包。
-  * 强制开始游戏或重置返回大厅。
+  * 强制开始游戏或重置返回大厅.
 * **NPC 生成**:
   * 房主状态下直接调用 `NpcManager.ServerInstance.ServerSpawnNpc` 权威生成。
   * 客机状态下通过 `CmdDevSpawnInteractable` 绕过权限申请生成。
@@ -35,11 +35,15 @@
   * 远程互动并释放警犬笼 (`DogCageInteractable.CmdInteract`)。
   * 远程触发自动贩卖机出货 (`VendingMachineInteractable`)。
   * 远程触发愿望单看板 (`WishlistInteractable`)。
+  * 远程引爆所有 C4 炸药 (`C4Charge.RpcExplode`)。
+  * 远程呼叫所有电梯 (`ElevatorCallButtonInteractable.CmdInteract`)。
+  * 远程开关所有休息室门 (`BreakRoomDoor.CmdTriggerDoorUnityEvent` / `CmdResetDoorUnityEvent`)。
+  * 远程拉响警报触发封锁 (`LockdownButtonInteractable.CmdInteract`)。
 
 ### 4. 逮捕绕过与栽赃 (Arrest & Scapegoating)
 * **防踢机制**: Harmony 拦截 `SteamMatchmakingTest.OnLobbyKicked` 阻断自动退房。
-* **栽赃逮捕 (Jail & Scapegoat)**:
-  在调用 `CmdArrest` 封包前，提取房间内其他玩家的 Steam 名字并临时修改本地 `playerName`，待封包发出后复原。使服务器判定逮捕动作者为被栽赃玩家。
+* **栽赃机制 (ExecuteWithSpoofedName)**:
+  实现了全局栽赃装饰器。在调用任何可能暴露身份的网络交互包（包括监禁、物理拉人、远程扑倒、NPC扑倒、强制自爆、放倒玩家、强制退场等）之前，算法自动提取当前场景中除了操作者和目标外的随机无辜玩家名字，临时伪装本地 `playerName` 发包，随后立即恢复。使全场通知和行为判定均指向该无辜玩家。
 
 ### 5. 秒退补丁 (Process Exit Patch)
 * 挂钩 `UnityEngine.Application.Quit` 并在拦截后执行 `GetCurrentProcess().Kill()`，避免 conhost/Steamworks API 同步锁死导致 Steam 持续显示游戏在运行的 Bug。
