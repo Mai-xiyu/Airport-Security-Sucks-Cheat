@@ -787,15 +787,40 @@ namespace AirportSecurityMod
                 y += 32f;
 
                 // 新增：第三排场景特权交互
-                if (GUI.Button(new Rect(170, y, 140, 28), "一键通关胜利")) TriggerInstantWin();
-                if (GUI.Button(new Rect(320, y, 140, 28), "切换关卡地图")) TriggerDevMapSwitch();
-                if (GUI.Button(new Rect(470, y, 140, 28), "开发者劫机")) TriggerDevHijack();
-                if (GUI.Button(new Rect(620, y, 160, 28), "激怒所有警犬")) TriggerDogAbuse();
+                bool isHost = localPlayerName != null && localPlayerName.isServer;
+                if (GUI.Button(new Rect(170, y, 140, 28), isHost ? "一键通关胜利" : "[仅房主] 一键通关"))
+                {
+                    if (isHost) TriggerInstantWin();
+                    else Plugin.LogSource.LogWarning("该功能仅限房主(Host)使用，客机调用会因权限问题被服务器断线！已安全拦截。");
+                }
+                if (GUI.Button(new Rect(320, y, 140, 28), isHost ? "切换关卡地图" : "[仅房主] 切换地图"))
+                {
+                    if (isHost) TriggerDevMapSwitch();
+                    else Plugin.LogSource.LogWarning("该功能仅限房主(Host)使用，客机调用会因权限问题被服务器断线！已安全拦截。");
+                }
+                if (GUI.Button(new Rect(470, y, 140, 28), isHost ? "开发者劫机" : "[仅房主] 触发劫机"))
+                {
+                    if (isHost) TriggerDevHijack();
+                    else Plugin.LogSource.LogWarning("该功能仅限房主(Host)使用，客机调用会因权限问题被服务器断线！已安全拦截。");
+                }
+                if (GUI.Button(new Rect(620, y, 160, 28), isHost ? "激怒所有警犬" : "[仅房主] 激怒警犬"))
+                {
+                    if (isHost) TriggerDogAbuse();
+                    else Plugin.LogSource.LogWarning("该功能仅限房主(Host)使用，客机调用会因权限问题被服务器断线！已安全拦截。");
+                }
                 y += 32f;
 
                 // 新增：第四排安检扫描仪指示灯控制
-                if (GUI.Button(new Rect(170, y, 290, 28), "安检扫描仪全部报警 (RED)")) SetAllScannersState(1);
-                if (GUI.Button(new Rect(480, y, 300, 28), "安检扫描仪全部放行 (GREEN)")) SetAllScannersState(2);
+                if (GUI.Button(new Rect(170, y, 290, 28), isHost ? "安检扫描仪全部报警 (RED)" : "[仅房主] 扫描仪全部红色报警"))
+                {
+                    if (isHost) SetAllScannersState(1);
+                    else Plugin.LogSource.LogWarning("该功能仅限房主(Host)使用，客机调用会因权限问题被服务器断线！已安全拦截。");
+                }
+                if (GUI.Button(new Rect(480, y, 300, 28), isHost ? "安检扫描仪全部放行 (GREEN)" : "[仅房主] 扫描仪全部绿色放行"))
+                {
+                    if (isHost) SetAllScannersState(2);
+                    else Plugin.LogSource.LogWarning("该功能仅限房主(Host)使用，客机调用会因权限问题被服务器断线！已安全拦截。");
+                }
                 y += 38f;
 
                 GUI.Label(new Rect(170, y, 610, 20), "<b>实体生成器 (仅限主机)</b>"); y += 25f;
@@ -2263,6 +2288,11 @@ namespace AirportSecurityMod
         // ===== 新增的场景交互方法 =====
         private void TriggerInstantWin()
         {
+            if (localPlayerName == null || !localPlayerName.isServer)
+            {
+                Plugin.LogSource.LogWarning("安全拦截：TriggerInstantWin 仅限房主(Host)使用");
+                return;
+            }
             try
             {
                 if (localMeta == null) UpdateLocalRefs();
@@ -2294,6 +2324,11 @@ namespace AirportSecurityMod
 
         private void TriggerDevMapSwitch()
         {
+            if (localPlayerName == null || !localPlayerName.isServer)
+            {
+                Plugin.LogSource.LogWarning("安全拦截：TriggerDevMapSwitch 仅限房主(Host)使用");
+                return;
+            }
             try
             {
                 var sws = UnityEngine.Object.FindObjectsOfType<NetworkedDevMapSwitch>();
@@ -2319,6 +2354,11 @@ namespace AirportSecurityMod
 
         private void TriggerDevHijack()
         {
+            if (localPlayerName == null || !localPlayerName.isServer)
+            {
+                Plugin.LogSource.LogWarning("安全拦截：TriggerDevHijack 仅限房主(Host)使用");
+                return;
+            }
             try
             {
                 var sws = UnityEngine.Object.FindObjectsOfType<NetworkedDevMapSwitch>();
@@ -2344,6 +2384,11 @@ namespace AirportSecurityMod
 
         private void TriggerDogAbuse()
         {
+            if (localPlayerName == null || !localPlayerName.isServer)
+            {
+                Plugin.LogSource.LogWarning("安全拦截：TriggerDogAbuse 仅限房主(Host)使用");
+                return;
+            }
             try
             {
                 var dogs = UnityEngine.Object.FindObjectsOfType<PoliceDog>();
@@ -2369,6 +2414,11 @@ namespace AirportSecurityMod
 
         private void SetAllScannersState(int stateVal)
         {
+            if (localPlayerName == null || !localPlayerName.isServer)
+            {
+                Plugin.LogSource.LogWarning("安全拦截：SetAllScannersState 仅限房主(Host)使用");
+                return;
+            }
             try
             {
                 var gloveScanners = UnityEngine.Object.FindObjectsOfType<GloveScannerInteractable>();
