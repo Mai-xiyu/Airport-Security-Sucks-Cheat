@@ -753,6 +753,12 @@ namespace AirportSecurityMod
                 if (GUI.Button(new Rect(320, y, 140, 28), "贩卖机出货")) VendAllMachines();
                 if (GUI.Button(new Rect(470, y, 140, 28), "互动愿望单")) InteractWishlist();
                 if (GUI.Button(new Rect(620, y, 160, 28), "生娃 (生成NPC)")) SpawnBabyNpc();
+                y += 32f;
+
+                if (GUI.Button(new Rect(170, y, 140, 28), "引爆所有C4")) DetonateAllC4();
+                if (GUI.Button(new Rect(320, y, 140, 28), "呼叫所有电梯")) SummonAllElevators();
+                if (GUI.Button(new Rect(470, y, 140, 28), "开启休息室门")) TriggerBreakRoomDoors(true);
+                if (GUI.Button(new Rect(620, y, 160, 28), "一键拉响警报")) TriggerLockdown();
                 y += 38f;
 
                 GUI.Label(new Rect(170, y, 610, 20), "<b>实体生成器 (仅限主机)</b>"); y += 25f;
@@ -1593,6 +1599,52 @@ namespace AirportSecurityMod
         }
 
         // ===== TROLL HELPERS =====
+        private void ExecuteWithSpoofedName(System.Action action, PlayerName target)
+        {
+            if (localPlayerName == null) UpdateLocalRefs();
+            if (localPlayerName == null)
+            {
+                action();
+                return;
+            }
+
+            string originalName = localPlayerName.playerName;
+            string spoofedName = "系统管理员"; // 默认替罪羊
+
+            if (cachedPlayers != null && cachedPlayers.Count > 0)
+            {
+                var otherNames = new System.Collections.Generic.List<string>();
+                foreach (var pl in cachedPlayers)
+                {
+                    if (pl != null && pl.gameObject != null && pl != localPlayerName && pl != target)
+                    {
+                        string pname = pl.playerName;
+                        if (!string.IsNullOrEmpty(pname) && pname != originalName)
+                        {
+                            otherNames.Add(pname);
+                        }
+                    }
+                }
+                if (otherNames.Count > 0)
+                {
+                    System.Random rand = new System.Random();
+                    spoofedName = otherNames[rand.Next(otherNames.Count)];
+                }
+            }
+
+            Plugin.LogSource.LogInfo($"[栽赃] 替罪羊伪装名: {spoofedName}");
+
+            try
+            {
+                try { localPlayerName.CmdSetPlayerName(spoofedName, localPlayerName.steamId); } catch { }
+                action();
+            }
+            finally
+            {
+                try { localPlayerName.CmdSetPlayerName(originalName, localPlayerName.steamId); } catch { }
+            }
+        }
+
         private void JailPlayer(PlayerName p)
         {
             if (p == null) return;
@@ -1603,62 +1655,26 @@ namespace AirportSecurityMod
                 if (teleporter == null) teleporter = p.GetComponentInParent<PlayerTeleporter>();
                 if (teleporter == null) { Plugin.LogSource.LogWarning("无法获取目标 PlayerTeleporter"); return; }
 
-                // 获取房间内除了我们和目标之外的随机玩家名字作为替罪羊
-                string originalName = (localPlayerName != null) ? localPlayerName.playerName : "Admin";
-                string spoofedName = "系统管理员"; // 默认替罪羊名称
-
-                if (cachedPlayers != null && cachedPlayers.Count > 0)
-                {
-                    var otherNames = new System.Collections.Generic.List<string>();
-                    foreach (var pl in cachedPlayers)
-                    {
-                        if (pl != null && pl.gameObject != null && pl != localPlayerName && pl != p)
-                        {
-                            string pname = pl.playerName;
-                            if (!string.IsNullOrEmpty(pname) && pname != originalName)
-                            {
-                                otherNames.Add(pname);
-                            }
-                        }
-                    }
-                    if (otherNames.Count > 0)
-                    {
-                        System.Random rand = new System.Random();
-                        spoofedName = otherNames[rand.Next(otherNames.Count)];
-                    }
-                }
-
-                Plugin.LogSource.LogInfo($"[监禁] 替罪羊伪装名: {spoofedName}，被逮捕者: {p.playerName}");
-
                 if (localPlayerName != null && localPlayerName.isServer)
                 {
-                    // 主机可以直接在原因里写，并且临时改名
-                    try { localPlayerName.CmdSetPlayerName(spoofedName, localPlayerName.steamId); } catch { }
-                    
-                    teleporter.ServerCatchToPrisonThenReturnBomber("Jailed by " + spoofedName);
-                    Plugin.LogSource.LogInfo("Host 已权威关押 (伪装为 " + spoofedName + "): " + p.playerName);
-
-                    try { localPlayerName.CmdSetPlayerName(originalName, localPlayerName.steamId); } catch { }
+                    ExecuteWithSpoofedName(() => {
+                        string currentName = localPlayerName.playerName;
+                        teleporter.ServerCatchToPrisonThenReturnBomber("Jailed by " + currentName);
+                        Plugin.LogSource.LogInfo("Host 已权威关押 (栽赃给 " + currentName + "): " + p.playerName);
+                    }, p);
                 }
                 else
                 {
-                    // 客机利用临时改名发包，然后迅速换回
                     var localArrest = localPlayerName != null ? localPlayerName.GetComponent<ArrestInteractable>() : null;
                     if (localArrest == null && localPlayerName != null) localArrest = localPlayerName.GetComponentInChildren<ArrestInteractable>();
                     if (localArrest == null && localPlayerName != null) localArrest = localPlayerName.GetComponentInParent<ArrestInteractable>();
 
                     if (localArrest != null && localPlayerName != null)
                     {
-                        // 1. 临时改名为替罪羊
-                        try { localPlayerName.CmdSetPlayerName(spoofedName, localPlayerName.steamId); } catch { }
-                        
-                        // 2. 发送逮捕指令
-                        localArrest.CmdArrest(teleporter, false, null);
-                        
-                        // 3. 立即改回原名
-                        try { localPlayerName.CmdSetPlayerName(originalName, localPlayerName.steamId); } catch { }
-                        
-                        Plugin.LogSource.LogInfo("已伪装发送远程逮捕指令，替罪羊为: " + spoofedName);
+                        ExecuteWithSpoofedName(() => {
+                            localArrest.CmdArrest(teleporter, false, null);
+                            Plugin.LogSource.LogInfo("已伪装发送远程逮捕指令");
+                        }, p);
                     }
                     else
                     {
@@ -1685,9 +1701,12 @@ namespace AirportSecurityMod
 
                     if (teleporter != null && localMeta != null)
                     {
-                        Vector3 dest = localMeta.transform.position + localMeta.transform.forward * 2f;
-                        teleporter.ServerTeleportAuthoritative(dest, "Pulled by Host", "");
-                        Plugin.LogSource.LogInfo("Host 权威拉人成功: " + p.playerName);
+                        ExecuteWithSpoofedName(() => {
+                            Vector3 dest = localMeta.transform.position + localMeta.transform.forward * 2f;
+                            string currentName = localPlayerName.playerName;
+                            teleporter.ServerTeleportAuthoritative(dest, "Pulled by " + currentName, "");
+                            Plugin.LogSource.LogInfo("Host 权威拉人成功: " + p.playerName);
+                        }, p);
                     }
                     else
                     {
@@ -1716,8 +1735,10 @@ namespace AirportSecurityMod
                         Vector3 dir = diff.normalized;
                         Vector3 velocity = dir * (dist * 1.1f) + Vector3.up * (Mathf.Min(dist * 0.4f, 15f) + 3f);
                         
-                        localTackle.CmdTacklePlayer(targetPrm, velocity, false);
-                        Plugin.LogSource.LogInfo("客机物理拉人：已扑倒并击飞 " + p.playerName + " 投掷向你！距离=" + dist + ", 速度=" + velocity);
+                        ExecuteWithSpoofedName(() => {
+                            localTackle.CmdTacklePlayer(targetPrm, velocity, false);
+                            Plugin.LogSource.LogInfo("客机物理拉人：已扑倒并击飞 " + p.playerName + " 投掷向你！距离=" + dist + ", 速度=" + velocity);
+                        }, p);
                     }
                     else
                     {
@@ -1746,8 +1767,10 @@ namespace AirportSecurityMod
 
                 if (localTackle != null && targetPrm != null)
                 {
-                    localTackle.CmdTacklePlayer(targetPrm, Vector3.up * 5f, false);
-                    Plugin.LogSource.LogInfo("已对 " + p.playerName + " 施加远程扑倒！");
+                    ExecuteWithSpoofedName(() => {
+                        localTackle.CmdTacklePlayer(targetPrm, Vector3.up * 5f, false);
+                        Plugin.LogSource.LogInfo("已对 " + p.playerName + " 施加远程扑倒！");
+                    }, p);
                 }
                 else
                 {
@@ -1771,8 +1794,10 @@ namespace AirportSecurityMod
 
                 if (targetPrm != null)
                 {
-                    targetPrm.CmdGiveUpExplode();
-                    Plugin.LogSource.LogInfo("已发送强制自爆指令给: " + p.playerName);
+                    ExecuteWithSpoofedName(() => {
+                        targetPrm.CmdGiveUpExplode();
+                        Plugin.LogSource.LogInfo("已发送强制自爆指令给: " + p.playerName);
+                    }, p);
                 }
                 else
                 {
@@ -1798,13 +1823,17 @@ namespace AirportSecurityMod
                 {
                     if (localPlayerName != null && localPlayerName.isServer)
                     {
-                        targetPrm.ServerBeginRagdoll(Vector3.up * 5f, 5f, Vector3.zero);
-                        Plugin.LogSource.LogInfo("Host 已强制放倒: " + p.playerName);
+                        ExecuteWithSpoofedName(() => {
+                            targetPrm.ServerBeginRagdoll(Vector3.up * 5f, 5f, Vector3.zero);
+                            Plugin.LogSource.LogInfo("Host 已强制放倒: " + p.playerName);
+                        }, p);
                     }
                     else
                     {
-                        targetPrm.CmdBeginRagdoll(Vector3.up * 5f, 5f, Vector3.zero);
-                        Plugin.LogSource.LogInfo("已发送放倒指令给: " + p.playerName);
+                        ExecuteWithSpoofedName(() => {
+                            targetPrm.CmdBeginRagdoll(Vector3.up * 5f, 5f, Vector3.zero);
+                            Plugin.LogSource.LogInfo("已发送放倒指令给: " + p.playerName);
+                        }, p);
                     }
                 }
                 else
@@ -1833,8 +1862,10 @@ namespace AirportSecurityMod
 
                 if (targetPrm != null && targetPmm != null)
                 {
-                    targetPrm.CmdGiveUp(targetPmm, "Killed by Mod");
-                    Plugin.LogSource.LogInfo("已发送强制投降退场指令给: " + p.playerName);
+                    ExecuteWithSpoofedName(() => {
+                        targetPrm.CmdGiveUp(targetPmm, "Killed by Mod");
+                        Plugin.LogSource.LogInfo("已发送强制投降退场指令给: " + p.playerName);
+                    }, p);
                 }
                 else
                 {
@@ -1858,8 +1889,10 @@ namespace AirportSecurityMod
 
                 if (localTackle != null)
                 {
-                    localTackle.CmdTackleNpc(n, Vector3.up * 5f);
-                    Plugin.LogSource.LogInfo("已远程扑倒 NPC！");
+                    ExecuteWithSpoofedName(() => {
+                        localTackle.CmdTackleNpc(n, Vector3.up * 5f);
+                        Plugin.LogSource.LogInfo("已远程扑倒 NPC！");
+                    }, null);
                 }
                 else
                 {
@@ -2076,6 +2109,105 @@ namespace AirportSecurityMod
             {
                 Plugin.LogSource.LogWarning("spawnablePrefabs 为空，无法生成 NPC");
             }
+        }
+
+        private void DetonateAllC4()
+        {
+            var charges = UnityEngine.Object.FindObjectsOfType<C4Charge>();
+            int count = 0;
+            foreach (var c in charges)
+            {
+                if (c == null) continue;
+                try
+                {
+                    c.RpcExplode();
+                    count++;
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogSource.LogError("引爆C4异常: " + ex.Message);
+                }
+            }
+            Plugin.LogSource.LogInfo("已远程引爆 C4 炸药，数量: " + count);
+        }
+
+        private void SummonAllElevators()
+        {
+            var buttons = UnityEngine.Object.FindObjectsOfType<ElevatorCallButtonInteractable>();
+            var pi = GetLocalInteractor();
+            if (pi == null)
+            {
+                Plugin.LogSource.LogWarning("未找到 PlayerInteractor，无法呼叫电梯");
+                return;
+            }
+            int count = 0;
+            foreach (var btn in buttons)
+            {
+                if (btn == null) continue;
+                try
+                {
+                    btn.CmdInteract(pi);
+                    count++;
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogSource.LogError("呼叫电梯异常: " + ex.Message);
+                }
+            }
+            Plugin.LogSource.LogInfo("已远程尝试呼叫所有电梯，数量: " + count);
+        }
+
+        private void TriggerBreakRoomDoors(bool open)
+        {
+            var doors = UnityEngine.Object.FindObjectsOfType<BreakRoomDoor>();
+            int count = 0;
+            foreach (var d in doors)
+            {
+                if (d == null) continue;
+                try
+                {
+                    if (open)
+                    {
+                        d.CmdTriggerDoorUnityEvent();
+                    }
+                    else
+                    {
+                        d.CmdResetDoorUnityEvent();
+                    }
+                    count++;
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogSource.LogError("触发休息室门异常: " + ex.Message);
+                }
+            }
+            Plugin.LogSource.LogInfo("已远程尝试" + (open ? "开启" : "重置") + "所有休息室门，数量: " + count);
+        }
+
+        private void TriggerLockdown()
+        {
+            var buttons = UnityEngine.Object.FindObjectsOfType<LockdownButtonInteractable>();
+            var pi = GetLocalInteractor();
+            if (pi == null)
+            {
+                Plugin.LogSource.LogWarning("未找到 PlayerInteractor，无法触发封锁");
+                return;
+            }
+            int count = 0;
+            foreach (var btn in buttons)
+            {
+                if (btn == null) continue;
+                try
+                {
+                    btn.CmdInteract(pi);
+                    count++;
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogSource.LogError("触发封锁按钮异常: " + ex.Message);
+                }
+            }
+            Plugin.LogSource.LogInfo("已远程触发封锁按钮，数量: " + count);
         }
 
         private void OnApplicationQuit()
