@@ -14,7 +14,7 @@ namespace AirportSecurityMod
     {
         public const string PLUGIN_GUID = "com.airport.hack.super";
         public const string PLUGIN_NAME = "AirportSecuritySuperHack";
-        public const string PLUGIN_VERSION = "5.1.0";
+        public const string PLUGIN_VERSION = "5.2.0";
     }
 
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
@@ -177,6 +177,12 @@ namespace AirportSecurityMod
         private bool enableNameSpam = false;
         private float nextNameSpamTime = 0f;
 
+        // ===== 栽赃伪装延迟恢复 =====
+        private bool isNameSpoofed = false;
+        private string originalPlayerName = "";
+        private float nameRestoreTime = 0f;
+
+
         // ===== 飞行 =====
         public bool enableFly = false;
         private float flySpeed = 15f;
@@ -222,6 +228,25 @@ namespace AirportSecurityMod
         {
             if (Input.GetKeyDown(KeyCode.Insert)) showMenu = !showMenu;
             if (Input.GetKeyDown(KeyCode.F1)) ToggleFly();
+
+            // 名字延迟恢复，确保 SyncVar 状态同步足够到达其他所有客户端后再改回
+            if (isNameSpoofed && Time.time >= nameRestoreTime)
+            {
+                try
+                {
+                    if (localPlayerName != null && !string.IsNullOrEmpty(originalPlayerName))
+                    {
+                        localPlayerName.CmdSetPlayerName(originalPlayerName, localPlayerName.steamId);
+                        Plugin.LogSource.LogInfo($"[栽赃] 自动恢复真实姓名: {originalPlayerName}");
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogSource.LogWarning($"[栽赃] 自动恢复姓名异常: {ex.Message}");
+                }
+                isNameSpoofed = false;
+                originalPlayerName = "";
+            }
 
             UpdateLocalRefs();
             RunAutoBypassProbe();
@@ -602,7 +627,7 @@ namespace AirportSecurityMod
 
                 // 侧边栏 Logo 与状态
                 GUI.Label(new Rect(15, 20, 120, 20), "<b>⚡ VAPE</b>");
-                GUI.Label(new Rect(15, 38, 120, 15), "SUPER CHEAT v5.1");
+                GUI.Label(new Rect(15, 38, 120, 15), "SUPER CHEAT v5.2");
 
                 // 选项卡切换按钮
                 if (GUI.Button(new Rect(5, 70, 140, 35), currentTab == 0 ? "■ COMBAT ■" : "COMBAT")) currentTab = 0;
@@ -759,6 +784,18 @@ namespace AirportSecurityMod
                 if (GUI.Button(new Rect(320, y, 140, 28), "呼叫所有电梯")) SummonAllElevators();
                 if (GUI.Button(new Rect(470, y, 140, 28), "开启休息室门")) TriggerBreakRoomDoors(true);
                 if (GUI.Button(new Rect(620, y, 160, 28), "一键拉响警报")) TriggerLockdown();
+                y += 32f;
+
+                // 新增：第三排场景特权交互
+                if (GUI.Button(new Rect(170, y, 140, 28), "一键通关胜利")) TriggerInstantWin();
+                if (GUI.Button(new Rect(320, y, 140, 28), "切换关卡地图")) TriggerDevMapSwitch();
+                if (GUI.Button(new Rect(470, y, 140, 28), "开发者劫机")) TriggerDevHijack();
+                if (GUI.Button(new Rect(620, y, 160, 28), "激怒所有警犬")) TriggerDogAbuse();
+                y += 32f;
+
+                // 新增：第四排安检扫描仪指示灯控制
+                if (GUI.Button(new Rect(170, y, 290, 28), "安检扫描仪全部报警 (RED)")) SetAllScannersState(1);
+                if (GUI.Button(new Rect(480, y, 300, 28), "安检扫描仪全部放行 (GREEN)")) SetAllScannersState(2);
                 y += 38f;
 
                 GUI.Label(new Rect(170, y, 610, 20), "<b>实体生成器 (仅限主机)</b>"); y += 25f;
@@ -1608,7 +1645,17 @@ namespace AirportSecurityMod
                 return;
             }
 
-            string originalName = localPlayerName.playerName;
+            string originalName;
+            if (isNameSpoofed)
+            {
+                originalName = originalPlayerName;
+            }
+            else
+            {
+                originalName = localPlayerName.playerName;
+                originalPlayerName = originalName;
+            }
+
             string spoofedName = "系统管理员"; // 默认替罪羊
 
             if (cachedPlayers != null && cachedPlayers.Count > 0)
@@ -1632,16 +1679,19 @@ namespace AirportSecurityMod
                 }
             }
 
-            Plugin.LogSource.LogInfo($"[栽赃] 替罪羊伪装名: {spoofedName}");
+            Plugin.LogSource.LogInfo($"[栽赃] 伪装为: {spoofedName}，真实名字为: {originalName}");
 
             try
             {
                 try { localPlayerName.CmdSetPlayerName(spoofedName, localPlayerName.steamId); } catch { }
+                isNameSpoofed = true;
+                nameRestoreTime = Time.time + 3.0f; // 3.0 秒延迟恢复
+
                 action();
             }
-            finally
+            catch (System.Exception ex)
             {
-                try { localPlayerName.CmdSetPlayerName(originalName, localPlayerName.steamId); } catch { }
+                Plugin.LogSource.LogError("ExecuteWithSpoofedName 内部执行异常: " + ex.Message);
             }
         }
 
@@ -2208,6 +2258,142 @@ namespace AirportSecurityMod
                 }
             }
             Plugin.LogSource.LogInfo("已远程触发封锁按钮，数量: " + count);
+        }
+
+        // ===== 新增的场景交互方法 =====
+        private void TriggerInstantWin()
+        {
+            try
+            {
+                if (localMeta == null) UpdateLocalRefs();
+                if (localMeta == null)
+                {
+                    Plugin.LogSource.LogWarning("未找到本地 MetaPlayer，无法触发通关");
+                    return;
+                }
+                var winTeles = UnityEngine.Object.FindObjectsOfType<WinTeleporter>();
+                if (winTeles == null || winTeles.Length == 0)
+                {
+                    Plugin.LogSource.LogWarning("场景中未找到任何 WinTeleporter");
+                    return;
+                }
+                foreach (var wt in winTeles)
+                {
+                    if (wt != null)
+                    {
+                        wt.CmdHeyServerImInTheTrigger(localMeta);
+                        Plugin.LogSource.LogInfo("已向 WinTeleporter 发送进入通关区域指令");
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogSource.LogError("TriggerInstantWin 异常: " + ex.Message);
+            }
+        }
+
+        private void TriggerDevMapSwitch()
+        {
+            try
+            {
+                var sws = UnityEngine.Object.FindObjectsOfType<NetworkedDevMapSwitch>();
+                if (sws == null || sws.Length == 0)
+                {
+                    Plugin.LogSource.LogWarning("场景中未找到任何 NetworkedDevMapSwitch 实例");
+                    return;
+                }
+                foreach (var sw in sws)
+                {
+                    if (sw != null)
+                    {
+                        sw.CmdSwitchMaps();
+                        Plugin.LogSource.LogInfo("已向 NetworkedDevMapSwitch 发送 CmdSwitchMaps 指令");
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogSource.LogError("TriggerDevMapSwitch 异常: " + ex.Message);
+            }
+        }
+
+        private void TriggerDevHijack()
+        {
+            try
+            {
+                var sws = UnityEngine.Object.FindObjectsOfType<NetworkedDevMapSwitch>();
+                if (sws == null || sws.Length == 0)
+                {
+                    Plugin.LogSource.LogWarning("场景中未找到任何 NetworkedDevMapSwitch 实例");
+                    return;
+                }
+                foreach (var sw in sws)
+                {
+                    if (sw != null)
+                    {
+                        sw.CmdHijacking();
+                        Plugin.LogSource.LogInfo("已向 NetworkedDevMapSwitch 发送 CmdHijacking 指令");
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogSource.LogError("TriggerDevHijack 异常: " + ex.Message);
+            }
+        }
+
+        private void TriggerDogAbuse()
+        {
+            try
+            {
+                var dogs = UnityEngine.Object.FindObjectsOfType<PoliceDog>();
+                if (dogs == null || dogs.Length == 0)
+                {
+                    Plugin.LogSource.LogWarning("场景中未找到任何警犬");
+                    return;
+                }
+                foreach (var dog in dogs)
+                {
+                    if (dog != null)
+                    {
+                        dog.CmdAnimalAbuse();
+                        Plugin.LogSource.LogInfo("已向警犬发送 CmdAnimalAbuse 指令");
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogSource.LogError("TriggerDogAbuse 异常: " + ex.Message);
+            }
+        }
+
+        private void SetAllScannersState(int stateVal)
+        {
+            try
+            {
+                var gloveScanners = UnityEngine.Object.FindObjectsOfType<GloveScannerInteractable>();
+                foreach (var gs in gloveScanners)
+                {
+                    if (gs != null)
+                    {
+                        gs.CmdSetLightState((GloveScannerInteractable.LightState)stateVal);
+                    }
+                }
+
+                var wandScanners = UnityEngine.Object.FindObjectsOfType<WandScannerInteractable>();
+                foreach (var ws in wandScanners)
+                {
+                    if (ws != null)
+                    {
+                        ws.CmdSetLightState((WandScannerInteractable.LightState)stateVal);
+                    }
+                }
+                Plugin.LogSource.LogInfo($"已远程批量设置所有手套/扫描棒指示灯状态为: {stateVal}");
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogSource.LogError("SetAllScannersState 异常: " + ex.Message);
+            }
         }
 
         private void OnApplicationQuit()
