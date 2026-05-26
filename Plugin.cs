@@ -201,6 +201,7 @@ namespace AirportSecurityMod
         private bool espBoxes = true;
         private bool espTracers = false;
         private float espMaxDistance = 200f;
+        private bool espNpc = true; // 透视 NPC
 
         // ===== 自动功能 =====
         private bool autoExposeContraband = false;
@@ -685,10 +686,12 @@ namespace AirportSecurityMod
                 GUI.Label(new Rect(170, y, 610, 20), "<b>== 透视与玩家设置 ==</b>"); y += 30f;
 
                 if (GUI.Button(new Rect(170, y, 290, 28), (espPlayer ? "[ ON ]" : "[ OFF ]") + " 透视玩家")) espPlayer = !espPlayer;
-                if (GUI.Button(new Rect(480, y, 290, 28), (espBoxes ? "[ ON ]" : "[ OFF ]") + " ESP 方框 (Boxes)")) espBoxes = !espBoxes;
+                if (GUI.Button(new Rect(480, y, 290, 28), (espNpc ? "[ ON ]" : "[ OFF ]") + " 透视 NPC")) espNpc = !espNpc;
                 y += 32f;
-                if (GUI.Button(new Rect(170, y, 290, 28), (espTracers ? "[ ON ]" : "[ OFF ]") + " ESP 射线 (Tracers)")) espTracers = !espTracers;
-                if (GUI.Button(new Rect(480, y, 290, 28), (espShowDistance ? "[ ON ]" : "[ OFF ]") + " 显示距离")) espShowDistance = !espShowDistance;
+                if (GUI.Button(new Rect(170, y, 290, 28), (espBoxes ? "[ ON ]" : "[ OFF ]") + " ESP 方框 (Boxes)")) espBoxes = !espBoxes;
+                if (GUI.Button(new Rect(480, y, 290, 28), (espTracers ? "[ ON ]" : "[ OFF ]") + " ESP 射线 (Tracers)")) espTracers = !espTracers;
+                y += 32f;
+                if (GUI.Button(new Rect(170, y, 290, 28), (espShowDistance ? "[ ON ]" : "[ OFF ]") + " 显示距离")) espShowDistance = !espShowDistance;
                 y += 32f;
 
                 GUI.Label(new Rect(170, y, 200, 28), "透视最大范围: " + espMaxDistance.ToString("0") + "m");
@@ -1019,7 +1022,7 @@ namespace AirportSecurityMod
                     if (GUI.Button(new Rect(460, y, 60, 22), "扑倒")) TacklePlayer(p);
                     if (GUI.Button(new Rect(525, y, 60, 22), "自爆")) ExplodePlayer(p);
                     if (GUI.Button(new Rect(590, y, 60, 22), "放倒")) RagdollPlayer(p);
-                    if (GUI.Button(new Rect(655, y, 60, 22), "强退")) GiveUpPlayer(p);
+                    if (GUI.Button(new Rect(655, y, 60, 22), "踢出")) KickPlayer(p);
                     if (GUI.Button(new Rect(720, y, 60, 22), "排泄")) DumpPlayerButt(p);
 
                     y += 26f;
@@ -1141,6 +1144,52 @@ namespace AirportSecurityMod
                         string txt = name;
                         if (espShowDistance) txt += " (" + d.ToString("0") + "m)";
                         DrawTextESP(footScreen.x, headY - 14f, txt, Color.green);
+                    }
+                    catch { }
+                }
+            }
+
+            if (espNpc)
+            {
+                foreach (var n in cachedNpcs)
+                {
+                    try
+                    {
+                        if (!SafeCheckAlive(n)) continue;
+                        Vector3 footWorld = n.transform.position;
+                        Vector3 headWorld = footWorld + Vector3.up * 1.8f;
+
+                        float d = Vector3.Distance(camPos, footWorld);
+                        if (d > espMaxDistance) continue;
+
+                        Vector3 footScreen = cam.WorldToScreenPoint(footWorld);
+                        Vector3 headScreen = cam.WorldToScreenPoint(headWorld);
+
+                        if (footScreen.z <= 0 || headScreen.z <= 0) continue;
+
+                        float footY = Screen.height - footScreen.y;
+                        float headY = Screen.height - headScreen.y;
+
+                        float h = footY - headY;
+                        float w = h / 2.2f;
+                        float x = footScreen.x - w / 2;
+                        float y = headY;
+
+                        if (espBoxes)
+                        {
+                            DrawBox(x, y, w, h, Color.yellow, 1.5f);
+                        }
+
+                        if (espTracers)
+                        {
+                            DrawLine(new Vector2(Screen.width / 2, Screen.height), new Vector2(footScreen.x, footY), Color.yellow, 1.0f);
+                        }
+
+                        string name = "NPC Cop/Civ";
+                        if (n.gameObject != null) name = n.gameObject.name;
+                        string txt = name;
+                        if (espShowDistance) txt += " (" + d.ToString("0") + "m)";
+                        DrawTextESP(footScreen.x, headY - 14f, txt, Color.yellow);
                     }
                     catch { }
                 }
@@ -1922,34 +1971,36 @@ namespace AirportSecurityMod
             }
         }
 
-        private void GiveUpPlayer(PlayerName p)
+        private void KickPlayer(PlayerName p)
         {
             if (p == null) return;
             try
             {
+                var localTackle = localPlayerName != null ? localPlayerName.GetComponent<PlayerTackle>() : null;
+                if (localTackle == null && localPlayerName != null) localTackle = localPlayerName.GetComponentInChildren<PlayerTackle>();
+                if (localTackle == null && localPlayerName != null) localTackle = localPlayerName.GetComponentInParent<PlayerTackle>();
+
                 var targetPrm = p.GetComponent<PlayerRagdollManager>();
                 if (targetPrm == null) targetPrm = p.GetComponentInChildren<PlayerRagdollManager>();
                 if (targetPrm == null) targetPrm = p.GetComponentInParent<PlayerRagdollManager>();
 
-                var targetPmm = p.GetComponent<PlayerModeManager>();
-                if (targetPmm == null) targetPmm = p.GetComponentInChildren<PlayerModeManager>();
-                if (targetPmm == null) targetPmm = p.GetComponentInParent<PlayerModeManager>();
-
-                if (targetPrm != null && targetPmm != null)
+                if (localTackle != null && targetPrm != null)
                 {
                     ExecuteWithSpoofedName(() => {
-                        targetPrm.CmdGiveUp(targetPmm, "Killed by Mod");
-                        Plugin.LogSource.LogInfo("已发送强制投降退场指令给: " + p.playerName);
+                        // 利用物理引擎 NaN 速度的致命漏洞，直接令目标客户端本地抛出物理计算异常而强制卡死并掉线
+                        UnityEngine.Vector3 crashVelocity = new UnityEngine.Vector3(float.NaN, float.NaN, float.NaN);
+                        localTackle.CmdTacklePlayer(targetPrm, crashVelocity, false);
+                        Plugin.LogSource.LogInfo("已对 " + p.playerName + " 发送 NaN 物理冲击，成功越权强制踢出！");
                     }, p);
                 }
                 else
                 {
-                    Plugin.LogSource.LogWarning("强退失败：未找到目标 RagdollManager 或 ModeManager");
+                    Plugin.LogSource.LogWarning("踢人失败：未找到本地 Tackle 或目标 RagdollManager");
                 }
             }
             catch (System.Exception ex)
             {
-                Plugin.LogSource.LogError("GiveUpPlayer 异常: " + ex.Message);
+                Plugin.LogSource.LogError("KickPlayer 异常: " + ex.Message);
             }
         }
 
