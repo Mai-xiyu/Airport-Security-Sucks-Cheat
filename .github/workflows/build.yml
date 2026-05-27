@@ -42,12 +42,28 @@ jobs:
       with:
         files: AirportSecurityMod.zip
         body: |
-          ### Airport Security Sucks! - Super Hack Mod Release
+          ### ⚡ Airport Security Sucks! - 联机控制与辅助系统 Release
+
+          #### 📖 安装教程 (Installation Guide)
+
+          ##### 第一步：安装 BepInEx 模组加载器 (Step 1: Install BepInEx Mod Loader)
+          本模组基于 BepInEx 6 (IL2CPP) 框架构建，请按照以下步骤安装加载器：
+          1. 下载 BepInEx 6.0.0-be.755 (IL2CPP) 对应的 Windows x64 版本。你可以从 BepInEx 官方仓库下载，或者使用已经打包好的加载器。
+          2. 将 BepInEx 压缩包内的所有内容解压至游戏根目录（即与游戏主程序 `Airport Security Sucks!.exe` 同级的目录）。
+          3. **重要**：解压完成后，先启动一次游戏，让 BepInEx 自动进行初始化和程序集生成（可能会有一些延迟，游戏正常进入即可），然后关闭游戏。此时游戏目录下会生成 `BepInEx/plugins` 等文件夹。
+
+          ##### 第二步：安装辅助模组 (Step 2: Install Mod)
+          1. 下载本 Release 下方的 `AirportSecurityMod.zip` 压缩包。
+          2. 将压缩包解压，将其中的 `BepInEx` 文件夹直接拖入游戏根目录中进行覆盖合并。
+          3. 确认 `AirportSecurityMod.dll` 已被正确放置在游戏根目录的 `BepInEx/plugins/` 文件夹内。
+
+          ##### 第三步：启动与使用 (Step 3: Launch & Use)
+          1. 正常启动游戏。
+          2. 成功加载后，在游戏内按 **`Insert`** 键可打开/关闭辅助菜单。
+          3. 按下 **`F1`** 键可直接切换穿墙飞行 (Noclip) 状态。
+
+          ---
           
-          **Installation:**
-          1. Download the `AirportSecurityMod.zip` file below.
-          2. Extract the contents directly into the game's root directory (where the game `.exe` is located).
-          3. This will merge the `BepInEx` folder and place `AirportSecurityMod.dll` into `BepInEx/plugins/`.
-          4. Start the game! Press `Insert` to open the mod menu, `F1` to toggle flying.
+          **提示**：在辅助的 **Tab 3 (ONLINE)** 中，推荐勾选 **`排版溢出防踢`**，即可自动隐藏你在房主那边的 Kick 按钮，彻底免疫所有踢出。
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
