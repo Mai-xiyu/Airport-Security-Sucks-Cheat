@@ -176,12 +176,18 @@ namespace AirportSecurityMod
         private Vector2 dragOffset = Vector2.zero;
         private bool enableNameSpam = false;
         private float nextNameSpamTime = 0f;
+        private bool enableAntiKick = true;
+        private bool enableAntiKickCrash = false;
+        private bool enableAntiKickLayout = true;
+        private bool enableInstantRecovery = true;
+        private bool enableNoTackleCooldown = false;
+        private System.Collections.Generic.List<PlayerName> infiniteRagdollList = new System.Collections.Generic.List<PlayerName>();
 
         // ===== 栽赃伪装延迟恢复 =====
         private bool isNameSpoofed = false;
         private string originalPlayerName = "";
         private float nameRestoreTime = 0f;
-
+        private PlayerName selectedTrollPlayer = null;
 
         // ===== 飞行 =====
         public bool enableFly = false;
@@ -225,6 +231,27 @@ namespace AirportSecurityMod
             Instance = this;
         }
 
+        private ulong GetHostSteamId()
+        {
+            try
+            {
+                var players = UnityEngine.Object.FindObjectsOfType<PlayerName>();
+                if (players != null)
+                {
+                    for (int i = 0; i < players.Length; i++)
+                    {
+                        var p = players[i];
+                        if (p != null && p.isHostPlayer && !SafeIsLocal(p))
+                        {
+                            return p.steamId;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return 0;
+        }
+
         private void Update()
         {
             if (Input.GetKeyDown(KeyCode.Insert)) showMenu = !showMenu;
@@ -233,23 +260,171 @@ namespace AirportSecurityMod
             // 名字延迟恢复，确保 SyncVar 状态同步足够到达其他所有客户端后再改回
             if (isNameSpoofed && Time.time >= nameRestoreTime)
             {
-                try
+                if (!(enableAntiKick && (enableAntiKickCrash || enableAntiKickLayout)))
                 {
-                    if (localPlayerName != null && !string.IsNullOrEmpty(originalPlayerName))
+                    try
                     {
-                        localPlayerName.CmdSetPlayerName(originalPlayerName, localPlayerName.steamId);
-                        Plugin.LogSource.LogInfo($"[栽赃] 自动恢复真实姓名: {originalPlayerName}");
+                        if (localPlayerName != null && !string.IsNullOrEmpty(originalPlayerName))
+                        {
+                            ulong steamIdToUse = localPlayerName.steamId;
+                            if (enableAntiKick)
+                            {
+                                ulong hostId = GetHostSteamId();
+                                if (hostId != 0) steamIdToUse = hostId;
+                            }
+                            localPlayerName.CmdSetPlayerName(originalPlayerName, steamIdToUse);
+                            Plugin.LogSource.LogInfo($"[栽赃] 自动恢复真实姓名: {originalPlayerName}");
+                        }
                     }
-                }
-                catch (System.Exception ex)
-                {
-                    Plugin.LogSource.LogWarning($"[栽赃] 自动恢复姓名异常: {ex.Message}");
+                    catch (System.Exception ex)
+                    {
+                        Plugin.LogSource.LogWarning($"[栽赃] 自动恢复姓名异常: {ex.Message}");
+                    }
                 }
                 isNameSpoofed = false;
                 originalPlayerName = "";
             }
 
             UpdateLocalRefs();
+
+            // 三阶段防踢 (SteamID + Carson 伪装 & 强力防踢 / 布局溢出防踢)
+            if (enableAntiKick && localPlayerName != null && !isNameSpoofed)
+            {
+                try
+                {
+                    // 1. Carson 开发者权限同步
+                    if (!localPlayerName.isCarson)
+                    {
+                        localPlayerName.CmdSetIsCarson(true);
+                        Plugin.LogSource.LogInfo("[防踢] 成功为本地玩家设置 Carson 开发者标记！");
+                    }
+
+                    // 2. 强力防踢 (利用 TMPro 溢出瘫痪房主端 TabUI)
+                    if (enableAntiKickCrash)
+                    {
+                        string crashName = "<sprite=999999>";
+                        if (localPlayerName.playerName != crashName)
+                        {
+                            ulong steamIdToUse = localPlayerName.steamId;
+                            ulong hostId = GetHostSteamId();
+                            if (hostId != 0) steamIdToUse = hostId;
+                            localPlayerName.CmdSetPlayerName(crashName, steamIdToUse);
+                            Plugin.LogSource.LogInfo("[防踢] 开启强力防踢：发送恶意富文本破坏房主 Tab 菜单！");
+                        }
+                    }
+                    else if (enableAntiKickLayout)
+                    {
+                        // 3. 布局排版溢出防踢 (追加空格把踢人按钮推到屏幕外)
+                        ulong hostId = GetHostSteamId();
+                        ulong steamIdToUse = (hostId != 0) ? hostId : localPlayerName.steamId;
+                        
+                        string currentCleanName = localPlayerName.playerName ?? "";
+                        if (currentCleanName.Contains("<space="))
+                        {
+                            int idx = currentCleanName.IndexOf("<space=");
+                            currentCleanName = currentCleanName.Substring(0, idx);
+                        }
+                        if (string.IsNullOrEmpty(currentCleanName))
+                        {
+                            currentCleanName = "游客";
+                        }
+                        
+                        string layoutName = currentCleanName + "<space=3000>";
+                        if (localPlayerName.playerName != layoutName || localPlayerName.steamId != steamIdToUse)
+                        {
+                            localPlayerName.CmdSetPlayerName(layoutName, steamIdToUse);
+                            Plugin.LogSource.LogInfo($"[防踢] 开启布局防踢：设置玩家名字为 {currentCleanName} + <space=3000>");
+                        }
+                    }
+                    else
+                    {
+                        // 4. 常规房主 SteamID 伪装
+                        ulong hostId = GetHostSteamId();
+                        if (hostId != 0 && localPlayerName.steamId != hostId && localPlayerName.steamId != 0)
+                        {
+                            localPlayerName.CmdSetPlayerName(localPlayerName.playerName, hostId);
+                            Plugin.LogSource.LogInfo($"[防踢] 成功为本地玩家伪装房主 SteamID: {hostId}");
+                        }
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.LogSource.LogError("[防踢] 自动防踢逻辑异常: " + ex.Message);
+                }
+            }
+
+            // 瞬间解控/秒爬
+            if (enableInstantRecovery && localPlayerName != null)
+            {
+                try
+                {
+                    var prm = localPlayerName.GetComponent<PlayerRagdollManager>();
+                    if (prm == null) prm = localPlayerName.GetComponentInChildren<PlayerRagdollManager>();
+                    if (prm == null) prm = localPlayerName.GetComponentInParent<PlayerRagdollManager>();
+
+                    if (prm != null && prm.isRagdollActive)
+                    {
+                        prm.CmdRecoverImmediatelyIfShould();
+                        prm.CmdRecover();
+                    }
+                }
+                catch { }
+            }
+
+            // 无冷却扑人
+            if (enableNoTackleCooldown && localPlayerName != null)
+            {
+                try
+                {
+                    var tackle = localPlayerName.GetComponent<PlayerTackle>();
+                    if (tackle == null) tackle = localPlayerName.GetComponentInChildren<PlayerTackle>();
+                    if (tackle == null) tackle = localPlayerName.GetComponentInParent<PlayerTackle>();
+
+                    if (tackle != null)
+                    {
+                        tackle.tackleCooldown = 0f;
+                        tackle.localTackleCooldownStartTime = 0f;
+                        tackle.localGrabCooldownStartTime = 0f;
+                        tackle.localRagdollCooldownStartTime = 0f;
+                    }
+                }
+                catch { }
+            }
+
+            // 无限倒地锁 (起身后再次自动放倒)
+            if (infiniteRagdollList.Count > 0)
+            {
+                for (int i = infiniteRagdollList.Count - 1; i >= 0; i--)
+                {
+                    var p = infiniteRagdollList[i];
+                    if (p == null || p.gameObject == null)
+                    {
+                        infiniteRagdollList.RemoveAt(i);
+                        continue;
+                    }
+
+                    try
+                    {
+                        var targetPrm = p.GetComponent<PlayerRagdollManager>();
+                        if (targetPrm == null) targetPrm = p.GetComponentInChildren<PlayerRagdollManager>();
+                        if (targetPrm == null) targetPrm = p.GetComponentInParent<PlayerRagdollManager>();
+
+                        if (targetPrm != null && !targetPrm.isRagdollActive)
+                        {
+                            if (localPlayerName != null && localPlayerName.isServer)
+                            {
+                                targetPrm.ServerBeginRagdoll(Vector3.up * 2f, 5f, Vector3.zero);
+                            }
+                            else
+                            {
+                                targetPrm.CmdBeginRagdoll(Vector3.up * 2f, 5f, Vector3.zero);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
             RunAutoBypassProbe();
 
             // 菜单拖拽逻辑（直接在 Update 中基于 Input 获取，完全避开 DragWindow 异常）
@@ -344,16 +519,30 @@ namespace AirportSecurityMod
             }
 
             // 循环随机乱码改名逻辑
+            // 循环随机乱码改名逻辑
             if (enableNameSpam && localPlayerName != null && Time.time > nextNameSpamTime)
             {
                 nextNameSpamTime = Time.time + 0.15f;
+                // 若开启强力防踢，跳过循环随机改名
+                if (enableAntiKick && enableAntiKickCrash) return;
                 try
                 {
                     string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$";
                     System.Random rand = new System.Random();
                     string randName = "";
                     for (int i = 0; i < 8; i++) randName += chars[rand.Next(chars.Length)];
-                    localPlayerName.CmdSetPlayerName(randName, localPlayerName.steamId);
+                    ulong steamIdToUse = localPlayerName.steamId;
+                    if (enableAntiKick)
+                    {
+                        ulong hostId = GetHostSteamId();
+                        if (hostId != 0) steamIdToUse = hostId;
+                        
+                        if (enableAntiKickLayout)
+                        {
+                            randName += "<space=3000>";
+                        }
+                    }
+                    localPlayerName.CmdSetPlayerName(randName, steamIdToUse);
                 }
                 catch { }
             }
@@ -683,89 +872,19 @@ namespace AirportSecurityMod
             }
             else if (currentTab == 1)
             {
-                GUI.Label(new Rect(170, y, 610, 20), "<b>== 透视与玩家设置 ==</b>"); y += 30f;
+                GUI.Label(new Rect(170, y, 610, 20), "<b>== ESP 视觉透视设置 ==</b>"); y += 30f;
 
                 if (GUI.Button(new Rect(170, y, 290, 28), (espPlayer ? "[ ON ]" : "[ OFF ]") + " 透视玩家")) espPlayer = !espPlayer;
                 if (GUI.Button(new Rect(480, y, 290, 28), (espNpc ? "[ ON ]" : "[ OFF ]") + " 透视 NPC")) espNpc = !espNpc;
+                y += 32f;
+                if (GUI.Button(new Rect(170, y, 290, 28), (espContraband ? "[ ON ]" : "[ OFF ]") + " 违禁品透视 (ESP)")) espContraband = !espContraband;
+                if (GUI.Button(new Rect(480, y, 290, 28), (autoExposeContraband ? "[ ON ]" : "[ OFF ]") + " 自动标记违禁品 Outline")) autoExposeContraband = !autoExposeContraband;
                 y += 32f;
                 if (GUI.Button(new Rect(170, y, 290, 28), (espBoxes ? "[ ON ]" : "[ OFF ]") + " ESP 方框 (Boxes)")) espBoxes = !espBoxes;
                 if (GUI.Button(new Rect(480, y, 290, 28), (espTracers ? "[ ON ]" : "[ OFF ]") + " ESP 射线 (Tracers)")) espTracers = !espTracers;
                 y += 32f;
                 if (GUI.Button(new Rect(170, y, 290, 28), (espShowDistance ? "[ ON ]" : "[ OFF ]") + " 显示距离")) espShowDistance = !espShowDistance;
-                y += 32f;
-
-                GUI.Label(new Rect(170, y, 200, 28), "透视最大范围: " + espMaxDistance.ToString("0") + "m");
-                if (GUI.Button(new Rect(380, y, 40, 28), "-")) espMaxDistance = Mathf.Max(20f, espMaxDistance - 20f);
-                if (GUI.Button(new Rect(430, y, 40, 28), "+")) espMaxDistance = Mathf.Min(500f, espMaxDistance + 20f);
-                y += 36f;
-
-                // 玩家列表分页（支持 6 名玩家，排布极度宽松）
-                int maxPages = (cachedPlayers.Count + 5) / 6;
-                if (maxPages < 1) maxPages = 1;
-                if (playerPage >= maxPages) playerPage = maxPages - 1;
-                if (playerPage < 0) playerPage = 0;
-
-                GUI.Label(new Rect(170, y, 200, 25), "<b>房间玩家 (页 " + (playerPage + 1) + "/" + maxPages + ")</b>");
-                if (GUI.Button(new Rect(380, y, 40, 22), "◀")) playerPage = Mathf.Max(0, playerPage - 1);
-                if (GUI.Button(new Rect(430, y, 40, 22), "▶")) playerPage = Mathf.Min(maxPages - 1, playerPage + 1);
-                y += 28f;
-
-                int startIndex = playerPage * 6;
-                for (int i = 0; i < 6; i++)
-                {
-                    int idx = startIndex + i;
-                    if (idx >= cachedPlayers.Count) break;
-                    var p = cachedPlayers[idx];
-                    if (!SafeCheckAlive(p)) continue;
-                    
-                    string name = "(未知)"; int money = 0;
-                    try { name = p.playerName ?? p.gameObject.name; } catch { }
-                    try { money = p.syncedMoney; } catch { }
-
-                    GUI.Label(new Rect(170, y, 200, 26), name + " | $" + money);
-                    
-                    if (GUI.Button(new Rect(380, y, 60, 26), "瞬移"))
-                    {
-                        if (p.transform != null) Teleport(p.transform.position + Vector3.up * 1f);
-                    }
-                    if (GUI.Button(new Rect(450, y, 60, 26), "拉人"))
-                    {
-                        PullPlayer(p);
-                    }
-                    if (GUI.Button(new Rect(520, y, 60, 26), "伪装"))
-                    {
-                        if (localPlayerName != null)
-                        {
-                            try
-                            {
-                                localPlayerName.CmdSetPlayerName(name, localPlayerName.steamId);
-                                newPlayerName = name;
-                                Plugin.LogSource.LogInfo("已伪装名称为: " + name);
-                            }
-                            catch (System.Exception ex)
-                            {
-                                Plugin.LogSource.LogError("伪装名称失败: " + ex.Message);
-                            }
-                        }
-                    }
-                    if (GUI.Button(new Rect(590, y, 60, 26), "监禁"))
-                    {
-                        JailPlayer(p);
-                    }
-                    if (GUI.Button(new Rect(660, y, 60, 26), "扑倒"))
-                    {
-                        TacklePlayer(p);
-                    }
-                    y += 30f;
-                }
-            }
-            else if (currentTab == 2)
-            {
-                GUI.Label(new Rect(170, y, 610, 20), "<b>== 违禁品与生成设置 ==</b>"); y += 30f;
-
-                if (GUI.Button(new Rect(170, y, 610, 30), (espContraband ? "[ ON ]" : "[ OFF ]") + " 违禁品透视 (ESP)")) espContraband = !espContraband; y += 35f;
-                if (GUI.Button(new Rect(170, y, 610, 30), (autoExposeContraband ? "[ ON ]" : "[ OFF ]") + " 自动标记违禁品 Outline")) autoExposeContraband = !autoExposeContraband; y += 35f;
-                if (GUI.Button(new Rect(170, y, 610, 30), "手动标记所有红框"))
+                if (GUI.Button(new Rect(480, y, 290, 28), "手动标记所有红框 Outline"))
                 {
                     int n = 0;
                     foreach (var c in cachedContrabands)
@@ -775,7 +894,16 @@ namespace AirportSecurityMod
                     }
                     Plugin.LogSource.LogInfo("标记Outline数量: " + n);
                 }
-                y += 35f;
+                y += 32f;
+
+                GUI.Label(new Rect(170, y, 200, 28), "透视最大范围: " + espMaxDistance.ToString("0") + "m");
+                if (GUI.Button(new Rect(380, y, 40, 28), "-")) espMaxDistance = Mathf.Max(20f, espMaxDistance - 20f);
+                if (GUI.Button(new Rect(430, y, 40, 28), "+")) espMaxDistance = Mathf.Min(500f, espMaxDistance + 20f);
+                y += 36f;
+            }
+            else if (currentTab == 2)
+            {
+                GUI.Label(new Rect(170, y, 610, 20), "<b>== 场景互动与生成设置 ==</b>"); y += 30f;
 
                 if (GUI.Button(new Rect(170, y, 140, 28), "释放警犬")) ReleaseAllDogs();
                 if (GUI.Button(new Rect(320, y, 140, 28), "贩卖机出货")) VendAllMachines();
@@ -884,13 +1012,84 @@ namespace AirportSecurityMod
                 newPlayerName = GUI.TextField(new Rect(240, y, 200, 24), newPlayerName ?? "");
                 if (GUI.Button(new Rect(450, y, 80, 24), "修改"))
                 {
-                    if (localPlayerName != null) { try { localPlayerName.CmdSetPlayerName(newPlayerName, localPlayerName.steamId); } catch { } }
+                    if (localPlayerName != null)
+                    {
+                        try
+                        {
+                            ulong steamIdToUse = localPlayerName.steamId;
+                            if (enableAntiKick)
+                            {
+                                ulong hostId = GetHostSteamId();
+                                if (hostId != 0) steamIdToUse = hostId;
+                            }
+                            localPlayerName.CmdSetPlayerName(newPlayerName, steamIdToUse);
+                        }
+                        catch { }
+                    }
                 }
                 y += 30f;
+
+                if (GUI.Button(new Rect(170, y, 610, 30), (enableAntiKick ? "[ ON ]" : "[ OFF ]") + " 房主 SteamID/Carson 伪装 (第一阶段-温和防踢)"))
+                {
+                    enableAntiKick = !enableAntiKick;
+                }
+                y += 35f;
+
+                if (enableAntiKick)
+                {
+                    if (GUI.Button(new Rect(170, y, 290, 30), (enableAntiKickLayout ? "[ ON ]" : "[ OFF ]") + " 排版溢出防踢 (推荐-推开踢人按钮)"))
+                    {
+                        enableAntiKickLayout = !enableAntiKickLayout;
+                        if (enableAntiKickLayout) enableAntiKickCrash = false;
+                    }
+                    if (GUI.Button(new Rect(490, y, 290, 30), (enableAntiKickCrash ? "[ ON ]" : "[ OFF ]") + " 瘫痪房主 Tab 菜单 (强力防踢)"))
+                    {
+                        enableAntiKickCrash = !enableAntiKickCrash;
+                        if (enableAntiKickCrash) enableAntiKickLayout = false;
+                    }
+                    y += 35f;
+                }
 
                 if (GUI.Button(new Rect(170, y, 610, 30), (enableNameSpam ? "[ ON ]" : "[ OFF ]") + " 循环随机乱码改名 (防踢/防选择)"))
                 {
                     enableNameSpam = !enableNameSpam;
+                }
+                y += 35f;
+
+                if (GUI.Button(new Rect(170, y, 290, 30), (enableInstantRecovery ? "[ ON ]" : "[ OFF ]") + " 瞬间倒地解控 / 秒爬"))
+                {
+                    enableInstantRecovery = !enableInstantRecovery;
+                }
+                if (GUI.Button(new Rect(490, y, 290, 30), (enableNoTackleCooldown ? "[ ON ]" : "[ OFF ]") + " 扑倒/抓人无冷却 (无限连扑)"))
+                {
+                    enableNoTackleCooldown = !enableNoTackleCooldown;
+                }
+                y += 35f;
+
+                GUI.Label(new Rect(170, y, 200, 20), "<b>联机越权房间控制:</b>"); y += 22f;
+                if (GUI.Button(new Rect(170, y, 290, 30), "【 越权强制开始游戏 】"))
+                {
+                    if (GameManager.Instance != null)
+                    {
+                        try { GameManager.Instance.CmdRequestStartGame(null); } catch { }
+                    }
+                    else
+                    {
+                        var gm = UnityEngine.Object.FindObjectOfType<GameManager>();
+                        if (gm != null) { try { gm.CmdRequestStartGame(null); } catch { } }
+                    }
+                }
+                if (GUI.Button(new Rect(490, y, 290, 30), "【 越权强制返回大厅 】"))
+                {
+                    if (GameManager.Instance != null)
+                    {
+                        try { GameManager.Instance.CmdRequestResetToLobby(null); } catch { }
+                    }
+                    else
+                    {
+                        var gm = UnityEngine.Object.FindObjectOfType<GameManager>();
+                        if (gm != null) { try { gm.CmdRequestResetToLobby(null); } catch { } }
+                    }
                 }
                 y += 35f;
 
@@ -970,20 +1169,20 @@ namespace AirportSecurityMod
             }
             else if (currentTab == 5)
             {
-                GUI.Label(new Rect(170, y, 610, 20), "<b>== 房间恶搞与全局指令 (Troll) ==</b>"); y += 30f;
+                GUI.Label(new Rect(170, y, 610, 20), "<b>== 房间恶搞与控制面板 (Troll) ==</b>"); y += 25f;
 
                 var gm = UnityEngine.Object.FindObjectOfType<GameManager>();
                 if (gm != null)
                 {
-                    if (GUI.Button(new Rect(170, y, 190, 28), "强制开启游戏"))
+                    if (GUI.Button(new Rect(170, y, 190, 26), "强制开启游戏"))
                     {
                         try { gm.CmdRequestStartGame(null); Plugin.LogSource.LogInfo("已发送强制开启游戏命令"); } catch { }
                     }
-                    if (GUI.Button(new Rect(380, y, 190, 28), "强制切换模式"))
+                    if (GUI.Button(new Rect(380, y, 190, 26), "强制切换模式"))
                     {
                         try { gm.CmdCycleGameMode(null); Plugin.LogSource.LogInfo("已发送强制切换模式命令"); } catch { }
                     }
-                    if (GUI.Button(new Rect(590, y, 190, 28), "强制返回大厅"))
+                    if (GUI.Button(new Rect(590, y, 190, 26), "强制返回大厅"))
                     {
                         try { gm.CmdRequestResetToLobby(null); Plugin.LogSource.LogInfo("已发送强制返回大厅命令"); } catch { }
                     }
@@ -994,18 +1193,23 @@ namespace AirportSecurityMod
                 }
                 y += 35f;
 
-                int maxTrollPages = (cachedPlayers.Count + 4) / 5;
+                // --- 左右分栏布局 ---
+                // 左侧栏：玩家列表 & 地标传送 & NPC扑倒 (x: 170 to 450, w: 280)
+                // 右侧栏：选中玩家的属性详情与单人操控面板 & 一键群体操控 (x: 470 to 785, w: 315)
+
+                // 【左侧栏绘制】
+                int maxTrollPages = (cachedPlayers.Count + 7) / 8;
                 if (maxTrollPages < 1) maxTrollPages = 1;
                 if (trollPlayerPage >= maxTrollPages) trollPlayerPage = maxTrollPages - 1;
                 if (trollPlayerPage < 0) trollPlayerPage = 0;
 
-                GUI.Label(new Rect(170, y, 200, 25), "<b>恶搞玩家 (页 " + (trollPlayerPage + 1) + "/" + maxTrollPages + ")</b>");
-                if (GUI.Button(new Rect(380, y, 40, 22), "◀")) trollPlayerPage = Mathf.Max(0, trollPlayerPage - 1);
-                if (GUI.Button(new Rect(430, y, 40, 22), "▶")) trollPlayerPage = Mathf.Min(maxTrollPages - 1, trollPlayerPage + 1);
-                y += 28f;
-
-                int startTrollIdx = trollPlayerPage * 5;
-                for (int i = 0; i < 5; i++)
+                GUI.Label(new Rect(170, y, 160, 22), "<b>房间玩家 (" + (trollPlayerPage + 1) + "/" + maxTrollPages + ")</b>");
+                if (GUI.Button(new Rect(340, y, 30, 20), "◀")) trollPlayerPage = Mathf.Max(0, trollPlayerPage - 1);
+                if (GUI.Button(new Rect(375, y, 30, 20), "▶")) trollPlayerPage = Mathf.Min(maxTrollPages - 1, trollPlayerPage + 1);
+                
+                float listY = y + 25f;
+                int startTrollIdx = trollPlayerPage * 8;
+                for (int i = 0; i < 8; i++)
                 {
                     int idx = startTrollIdx + i;
                     if (idx >= cachedPlayers.Count) break;
@@ -1015,31 +1219,60 @@ namespace AirportSecurityMod
                     string name = "(未知)";
                     try { name = p.playerName ?? p.gameObject.name; } catch { }
 
-                    GUI.Label(new Rect(170, y, 150, 22), "<b>" + name + "</b>");
-                    
-                    if (GUI.Button(new Rect(330, y, 60, 22), "监禁")) JailPlayer(p);
-                    if (GUI.Button(new Rect(395, y, 60, 22), "拉人")) PullPlayer(p);
-                    if (GUI.Button(new Rect(460, y, 60, 22), "扑倒")) TacklePlayer(p);
-                    if (GUI.Button(new Rect(525, y, 60, 22), "自爆")) ExplodePlayer(p);
-                    if (GUI.Button(new Rect(590, y, 60, 22), "放倒")) RagdollPlayer(p);
-                    if (GUI.Button(new Rect(655, y, 60, 22), "踢出")) KickPlayer(p);
-                    if (GUI.Button(new Rect(720, y, 60, 22), "排泄")) DumpPlayerButt(p);
+                    string roleTag = p.IsAgent ? "[警]" : "[匪]";
+                    string authTag = p.isLocalPlayer ? "[我]" : (p.isHostPlayer ? "[房主]" : "[客机]");
+                    string btnText = $"{name} {authTag}{roleTag}";
 
-                    y += 26f;
+                    if (selectedTrollPlayer == p)
+                    {
+                        btnText = $"▶ {btnText} ◀";
+                    }
+
+                    if (GUI.Button(new Rect(170, listY, 280, 24), btnText))
+                    {
+                        selectedTrollPlayer = p;
+                    }
+                    listY += 26f;
                 }
 
-                y += 10f; // 间距
+                // 左下角地标瞬移
+                GUI.Label(new Rect(170, 320, 280, 20), "<b>== 本地玩家地标瞬移 ==</b>");
+                if (GUI.Button(new Rect(170, 340, 135, 24), "前台/大厅"))
+                {
+                    Vector3 dest = GetLocationCoords("前台/大厅");
+                    if (dest != Vector3.zero) Teleport(dest);
+                    else Plugin.LogSource.LogWarning("未在当前关卡找到前台大厅交互点！");
+                }
+                if (GUI.Button(new Rect(315, 340, 135, 24), "安检休息室"))
+                {
+                    Vector3 dest = GetLocationCoords("休息室");
+                    if (dest != Vector3.zero) Teleport(dest);
+                    else Plugin.LogSource.LogWarning("未在当前关卡找到休息室交互点！");
+                }
+                if (GUI.Button(new Rect(170, 370, 135, 24), "登机口/飞机"))
+                {
+                    Vector3 dest = GetLocationCoords("登机口/飞机");
+                    if (dest != Vector3.zero) Teleport(dest);
+                    else Plugin.LogSource.LogWarning("未在当前关卡找到登机口飞机交互点！");
+                }
+                if (GUI.Button(new Rect(315, 370, 135, 24), "禁闭监狱"))
+                {
+                    Vector3 dest = GetLocationCoords("监狱");
+                    if (dest != Vector3.zero) Teleport(dest);
+                    else Plugin.LogSource.LogWarning("未在当前关卡找到监狱交互点！");
+                }
 
+                // 左侧NPC控制
                 int maxNpcPages = (cachedNpcs.Count + 4) / 5;
                 if (maxNpcPages < 1) maxNpcPages = 1;
                 if (npcPage >= maxNpcPages) npcPage = maxNpcPages - 1;
                 if (npcPage < 0) npcPage = 0;
 
-                GUI.Label(new Rect(170, y, 200, 25), "<b>场景 NPC (页 " + (npcPage + 1) + "/" + maxNpcPages + ")</b>");
-                if (GUI.Button(new Rect(380, y, 40, 22), "◀")) npcPage = Mathf.Max(0, npcPage - 1);
-                if (GUI.Button(new Rect(430, y, 40, 22), "▶")) npcPage = Mathf.Min(maxNpcPages - 1, npcPage + 1);
-                y += 28f;
+                GUI.Label(new Rect(170, 405, 160, 20), "<b>场景 NPC (" + (npcPage + 1) + "/" + maxNpcPages + ")</b>");
+                if (GUI.Button(new Rect(340, 405, 30, 20), "◀")) npcPage = Mathf.Max(0, npcPage - 1);
+                if (GUI.Button(new Rect(375, 405, 30, 20), "▶")) npcPage = Mathf.Min(maxNpcPages - 1, npcPage + 1);
 
+                float npcY = 430f;
                 int startNpcIdx = npcPage * 5;
                 for (int i = 0; i < 5; i++)
                 {
@@ -1052,12 +1285,215 @@ namespace AirportSecurityMod
                     float dist = 0f;
                     if (localMeta != null) dist = Vector3.Distance(localMeta.transform.position, n.transform.position);
 
-                    GUI.Label(new Rect(170, y, 150, 22), nname + " [" + dist.ToString("0") + "m]");
-                    
-                    if (GUI.Button(new Rect(330, y, 80, 22), "扑倒NPC")) TackleNpc(n);
-                    if (GUI.Button(new Rect(420, y, 80, 22), "传送到NPC")) Teleport(n.transform.position + Vector3.up * 1f);
+                    GUI.Label(new Rect(170, npcY, 150, 22), nname + " [" + dist.ToString("0") + "m]");
+                    if (GUI.Button(new Rect(325, npcY, 60, 22), "扑倒")) TackleNpc(n);
+                    if (GUI.Button(new Rect(390, npcY, 60, 22), "传送")) Teleport(n.transform.position + Vector3.up * 1f);
+                    npcY += 24f;
+                }
 
-                    y += 26f;
+                // 【右侧栏绘制】
+                if (selectedTrollPlayer == null || !SafeCheckAlive(selectedTrollPlayer))
+                {
+                    GUI.Box(new Rect(470, 80, 315, 490), "");
+                    GUI.Label(new Rect(485, 90, 290, 20), "<b>【 未选择单人目标 】</b>");
+                    GUI.Label(new Rect(485, 115, 290, 40), "<color=yellow>请在左侧选择玩家进行单人控制。\n或使用下方的一键群体恶搞功能：</color>");
+
+                    DrawGroupActionsPanel(165f);
+                }
+                else
+                {
+                    GUI.Box(new Rect(470, 80, 315, 490), "");
+                    float detailsY = 90f;
+                    GUI.Label(new Rect(485, detailsY, 290, 20), "<b>【 目标玩家详情 】</b>"); detailsY += 22f;
+
+                    string tName = "(未知)";
+                    int tPing = 0;
+                    int tMoney = 0;
+                    bool tIsAgent = false;
+                    bool tIsHost = false;
+                    bool tIsLocal = false;
+                    try
+                    {
+                        tName = selectedTrollPlayer.playerName;
+                        tPing = selectedTrollPlayer.pingMs;
+                        tMoney = selectedTrollPlayer.syncedMoney;
+                        tIsAgent = selectedTrollPlayer.IsAgent;
+                        tIsHost = selectedTrollPlayer.isHostPlayer;
+                        tIsLocal = selectedTrollPlayer.isLocalPlayer;
+                    }
+                    catch { }
+
+                    string roleStr = tIsAgent ? "<color=cyan>警卫 / 警察</color>" : "<color=orange>走私犯 / 平民</color>";
+                    string authStr = tIsLocal ? "本地玩家 (自己)" : (tIsHost ? "房主 (Host)" : "客机 (Client)");
+
+                    GUI.Label(new Rect(485, detailsY, 290, 20), $"玩家姓名: <b>{tName}</b>"); detailsY += 20f;
+                    GUI.Label(new Rect(485, detailsY, 290, 20), $"身份阵营: <b>{roleStr}</b>"); detailsY += 20f;
+                    GUI.Label(new Rect(485, detailsY, 290, 20), $"房间权限: <b>{authStr}</b>"); detailsY += 20f;
+                    GUI.Label(new Rect(485, detailsY, 290, 20), $"网络延迟: <b>{tPing} ms</b>"); detailsY += 20f;
+                    GUI.Label(new Rect(485, detailsY, 290, 20), $"携带资金: <b>$ {tMoney:N0}</b>"); detailsY += 25f;
+
+                    GUI.Label(new Rect(485, detailsY, 290, 20), "<b>【 远程恶搞与操控指令 】</b>"); detailsY += 25f;
+
+                    if (GUI.Button(new Rect(485, detailsY, 135, 26), "瞬移到他"))
+                    {
+                        if (selectedTrollPlayer.transform != null)
+                            Teleport(selectedTrollPlayer.transform.position + Vector3.up * 1f);
+                    }
+                    if (GUI.Button(new Rect(635, detailsY, 135, 26), "拉他过来"))
+                    {
+                        PullPlayer(selectedTrollPlayer);
+                    }
+                    detailsY += 30f;
+
+                    if (GUI.Button(new Rect(485, detailsY, 135, 26), "远程监禁"))
+                    {
+                        JailPlayer(selectedTrollPlayer);
+                    }
+                    if (GUI.Button(new Rect(635, detailsY, 135, 26), "远程扑倒"))
+                    {
+                        TacklePlayer(selectedTrollPlayer);
+                    }
+                    detailsY += 30f;
+
+                    // 第三排 (三分列)
+                    if (GUI.Button(new Rect(485, detailsY, 90, 26), "强行放倒"))
+                    {
+                        RagdollPlayer(selectedTrollPlayer);
+                    }
+                    bool isLocked = infiniteRagdollList.Contains(selectedTrollPlayer);
+                    if (GUI.Button(new Rect(580, detailsY, 95, 26), (isLocked ? "[锁]" : "[开]") + "锁定倒地"))
+                    {
+                        if (isLocked)
+                        {
+                            infiniteRagdollList.Remove(selectedTrollPlayer);
+                            Plugin.LogSource.LogInfo("已移除对 " + selectedTrollPlayer.playerName + " 的无限倒地锁定");
+                        }
+                        else
+                        {
+                            infiniteRagdollList.Add(selectedTrollPlayer);
+                            Plugin.LogSource.LogInfo("已开启对 " + selectedTrollPlayer.playerName + " 的无限倒地锁定");
+                        }
+                    }
+                    if (GUI.Button(new Rect(680, detailsY, 90, 26), "远程自爆"))
+                    {
+                        ExplodePlayer(selectedTrollPlayer);
+                    }
+                    detailsY += 30f;
+
+                    // 第四排 (踢出/排泄)
+                    if (GUI.Button(new Rect(485, detailsY, 135, 26), "物理踢出"))
+                    {
+                        KickPlayer(selectedTrollPlayer);
+                    }
+                    if (GUI.Button(new Rect(635, detailsY, 135, 26), "屁股排泄"))
+                    {
+                        DumpPlayerButt(selectedTrollPlayer);
+                    }
+                    detailsY += 30f;
+
+                    // 第五排 (阵营设置与改名，三分列)
+                    if (GUI.Button(new Rect(485, detailsY, 90, 26), "设为警卫"))
+                    {
+                        if (localPlayerName != null && selectedTrollPlayer != null && selectedTrollPlayer.PlayerModeManager != null)
+                        {
+                            var localTeleporter = localPlayerName.GetComponent<PlayerTeleporter>();
+                            if (localTeleporter == null) localTeleporter = localPlayerName.GetComponentInChildren<PlayerTeleporter>();
+                            if (localTeleporter == null) localTeleporter = localPlayerName.GetComponentInParent<PlayerTeleporter>();
+
+                            if (localTeleporter != null)
+                            {
+                                try
+                                {
+                                    localTeleporter.CmdSetIsAgent(selectedTrollPlayer.PlayerModeManager, true);
+                                    Plugin.LogSource.LogInfo($"已远程越权将 {selectedTrollPlayer.playerName} 设为警卫阵营！");
+                                }
+                                catch (System.Exception ex)
+                                {
+                                    Plugin.LogSource.LogError("CmdSetIsAgent 异常: " + ex.Message);
+                                }
+                            }
+                        }
+                    }
+                    if (GUI.Button(new Rect(580, detailsY, 95, 26), "设为平民"))
+                    {
+                        if (localPlayerName != null && selectedTrollPlayer != null && selectedTrollPlayer.PlayerModeManager != null)
+                        {
+                            var localTeleporter = localPlayerName.GetComponent<PlayerTeleporter>();
+                            if (localTeleporter == null) localTeleporter = localPlayerName.GetComponentInChildren<PlayerTeleporter>();
+                            if (localTeleporter == null) localTeleporter = localPlayerName.GetComponentInParent<PlayerTeleporter>();
+
+                            if (localTeleporter != null)
+                            {
+                                try
+                                {
+                                    localTeleporter.CmdSetIsAgent(selectedTrollPlayer.PlayerModeManager, false);
+                                    Plugin.LogSource.LogInfo($"已远程越权将 {selectedTrollPlayer.playerName} 设为平民阵营！");
+                                }
+                                catch (System.Exception ex)
+                                {
+                                    Plugin.LogSource.LogError("CmdSetIsAgent 异常: " + ex.Message);
+                                }
+                            }
+                        }
+                    }
+                    if (GUI.Button(new Rect(680, detailsY, 90, 26), "伪装名字"))
+                    {
+                        if (localPlayerName != null)
+                        {
+                            try
+                            {
+                                if (!isNameSpoofed)
+                                {
+                                    originalPlayerName = localPlayerName.playerName;
+                                    isNameSpoofed = true;
+                                }
+                                nameRestoreTime = float.MaxValue;
+                                ulong steamIdToUse = localPlayerName.steamId;
+                                if (enableAntiKick)
+                                {
+                                    ulong hostId = GetHostSteamId();
+                                    if (hostId != 0) steamIdToUse = hostId;
+                                }
+                                localPlayerName.CmdSetPlayerName(tName, steamIdToUse);
+                                Plugin.LogSource.LogInfo($"已手动伪装名称为: {tName}，原名为: {originalPlayerName}");
+                            }
+                            catch (System.Exception ex)
+                            {
+                                Plugin.LogSource.LogError("手动伪装名字失败: " + ex.Message);
+                            }
+                        }
+                    }
+                    detailsY += 30f;
+
+                    if (isNameSpoofed && nameRestoreTime == float.MaxValue)
+                    {
+                        if (GUI.Button(new Rect(485, detailsY, 285, 26), "恢复原名"))
+                        {
+                            if (localPlayerName != null && !string.IsNullOrEmpty(originalPlayerName))
+                            {
+                                try
+                                {
+                                    ulong steamIdToUse = localPlayerName.steamId;
+                                    if (enableAntiKick)
+                                    {
+                                        ulong hostId = GetHostSteamId();
+                                        if (hostId != 0) steamIdToUse = hostId;
+                                    }
+                                    localPlayerName.CmdSetPlayerName(originalPlayerName, steamIdToUse);
+                                    Plugin.LogSource.LogInfo($"已手动恢复真实姓名: {originalPlayerName}");
+                                }
+                                catch (System.Exception ex)
+                                {
+                                    Plugin.LogSource.LogError("手动恢复真实姓名失败: " + ex.Message);
+                                }
+                            }
+                            isNameSpoofed = false;
+                            originalPlayerName = "";
+                        }
+                    }
+
+                    // 选中状态下，群体一键面板绘制在下方空余位置 (Details + actions takes about ~300px, startY at 385)
+                    DrawGroupActionsPanel(385f);
                 }
             }
         }
@@ -1757,7 +2193,13 @@ namespace AirportSecurityMod
 
             try
             {
-                try { localPlayerName.CmdSetPlayerName(spoofedName, localPlayerName.steamId); } catch { }
+                ulong steamIdToUse = localPlayerName.steamId;
+                if (enableAntiKick)
+                {
+                    ulong hostId = GetHostSteamId();
+                    if (hostId != 0) steamIdToUse = hostId;
+                }
+                try { localPlayerName.CmdSetPlayerName(spoofedName, steamIdToUse); } catch { }
                 isNameSpoofed = true;
                 nameRestoreTime = Time.time + 3.0f; // 3.0 秒延迟恢复
 
@@ -2494,6 +2936,168 @@ namespace AirportSecurityMod
             catch (System.Exception ex)
             {
                 Plugin.LogSource.LogError("SetAllScannersState 异常: " + ex.Message);
+            }
+        }
+
+        private Vector3 GetLocationCoords(string locName)
+        {
+            try
+            {
+                if (locName == "监狱")
+                {
+                    var jail = UnityEngine.Object.FindObjectOfType<JailInteractableFix>();
+                    if (jail != null) return jail.transform.position + Vector3.up * 1f;
+                }
+                else if (locName == "登机口/飞机")
+                {
+                    var winTel = UnityEngine.Object.FindObjectsOfType<WinTeleporter>();
+                    if (winTel != null && winTel.Length > 0) return winTel[0].transform.position + Vector3.up * 1f;
+
+                    var plane = UnityEngine.Object.FindObjectOfType<PlaneController>();
+                    if (plane != null) return plane.transform.position + Vector3.up * 1f;
+                }
+                else if (locName == "前台/大厅")
+                {
+                    var kiosk = UnityEngine.Object.FindObjectOfType<KioskInteractable>();
+                    if (kiosk != null) return kiosk.transform.position + Vector3.up * 1f;
+
+                    var hostBooth = UnityEngine.Object.FindObjectOfType<HostBoothInteractable>();
+                    if (hostBooth != null) return hostBooth.transform.position + Vector3.up * 1f;
+                }
+                else if (locName == "休息室")
+                {
+                    var brControls = UnityEngine.Object.FindObjectOfType<BreakRoomControlsInteractable>();
+                    if (brControls != null) return brControls.transform.position + Vector3.up * 1f;
+
+                    var brDoor = UnityEngine.Object.FindObjectOfType<BreakRoomDoor>();
+                    if (brDoor != null) return brDoor.transform.position + Vector3.up * 1f;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogSource.LogError("GetLocationCoords 异常: " + ex.Message);
+            }
+            return Vector3.zero;
+        }
+
+        private void DrawGroupActionsPanel(float startY)
+        {
+            GUI.Label(new Rect(485, startY, 290, 20), "<b>【 团队群体恶搞 (Group Actions) 】</b>"); startY += 22f;
+
+            // Header labels
+            GUI.Label(new Rect(485, startY, 100, 20), "一键操作:");
+            GUI.Label(new Rect(590, startY, 90, 20), "<b><color=cyan>【警卫组】</color></b>");
+            GUI.Label(new Rect(685, startY, 90, 20), "<b><color=orange>【走私犯】</color></b>");
+            startY += 20f;
+
+            // Row 1: 一键监禁
+            GUI.Label(new Rect(485, startY, 100, 22), "一键监禁");
+            if (GUI.Button(new Rect(585, startY, 90, 22), "监禁")) ExecuteGroupAction(true, "jail");
+            if (GUI.Button(new Rect(680, startY, 90, 22), "监禁")) ExecuteGroupAction(false, "jail");
+            startY += 24f;
+
+            // Row 2: 一键扑倒
+            GUI.Label(new Rect(485, startY, 100, 22), "一键扑倒");
+            if (GUI.Button(new Rect(585, startY, 90, 22), "扑倒")) ExecuteGroupAction(true, "tackle");
+            if (GUI.Button(new Rect(680, startY, 90, 22), "扑倒")) ExecuteGroupAction(false, "tackle");
+            startY += 24f;
+
+            // Row 3: 一键放倒
+            GUI.Label(new Rect(485, startY, 100, 22), "一键放倒");
+            if (GUI.Button(new Rect(585, startY, 90, 22), "放倒")) ExecuteGroupAction(true, "ragdoll");
+            if (GUI.Button(new Rect(680, startY, 90, 22), "放倒")) ExecuteGroupAction(false, "ragdoll");
+            startY += 24f;
+
+            // 新增: 一键锁定倒地
+            GUI.Label(new Rect(485, startY, 100, 22), "一键锁定倒地");
+            if (GUI.Button(new Rect(585, startY, 90, 22), "锁定(警)")) LockGroupRagdoll(true);
+            if (GUI.Button(new Rect(680, startY, 90, 22), "锁定(匪)")) LockGroupRagdoll(false);
+            startY += 24f;
+
+            // Row 4: 一键自爆
+            GUI.Label(new Rect(485, startY, 100, 22), "一键自爆");
+            if (GUI.Button(new Rect(585, startY, 90, 22), "自爆")) ExecuteGroupAction(true, "explode");
+            if (GUI.Button(new Rect(680, startY, 90, 22), "自爆")) ExecuteGroupAction(false, "explode");
+            startY += 24f;
+
+            // Row 5: 一键踢出
+            GUI.Label(new Rect(485, startY, 100, 22), "一键踢出");
+            if (GUI.Button(new Rect(585, startY, 90, 22), "物理踢出")) ExecuteGroupAction(true, "kick");
+            if (GUI.Button(new Rect(680, startY, 90, 22), "物理踢出")) ExecuteGroupAction(false, "kick");
+            startY += 24f;
+
+            // Row 6: 一键排泄
+            bool isHost = localPlayerName != null && localPlayerName.isServer;
+            GUI.Label(new Rect(485, startY, 100, 22), isHost ? "一键排泄" : "一键排泄(仅房主)");
+            if (GUI.Button(new Rect(585, startY, 90, 22), "排泄"))
+            {
+                if (isHost) ExecuteGroupAction(true, "dump");
+                else Plugin.LogSource.LogWarning("一键强制他人排泄仅限房主(Host)有效！");
+            }
+            if (GUI.Button(new Rect(680, startY, 90, 22), "排泄"))
+            {
+                if (isHost) ExecuteGroupAction(false, "dump");
+                else Plugin.LogSource.LogWarning("一键强制他人排泄仅限房主(Host)有效！");
+            }
+            startY += 28f;
+
+            if (GUI.Button(new Rect(485, startY, 285, 24), "【 一键解除全场倒地锁定 】"))
+            {
+                infiniteRagdollList.Clear();
+                Plugin.LogSource.LogInfo("已清除全场所有倒地锁定！");
+            }
+            startY += 28f;
+        }
+
+        private void LockGroupRagdoll(bool isAgent)
+        {
+            try
+            {
+                int count = 0;
+                foreach (var p in cachedPlayers)
+                {
+                    if (p != null && p.IsAgent == isAgent && !SafeIsLocal(p))
+                    {
+                        if (!infiniteRagdollList.Contains(p))
+                        {
+                            infiniteRagdollList.Add(p);
+                            count++;
+                        }
+                    }
+                }
+                Plugin.LogSource.LogInfo($"已一键锁定 {count} 个 " + (isAgent ? "警卫" : "走私犯") + " 无限倒地！");
+            }
+            catch { }
+        }
+
+        private void ExecuteGroupAction(bool targetAgent, string actionType)
+        {
+            try
+            {
+                UpdateTargets();
+                int count = 0;
+                foreach (var p in cachedPlayers)
+                {
+                    if (!SafeCheckAlive(p)) continue;
+                    if (p.isLocalPlayer) continue;
+                    if (p.IsAgent != targetAgent) continue;
+
+                    if (actionType == "jail") JailPlayer(p);
+                    else if (actionType == "tackle") TacklePlayer(p);
+                    else if (actionType == "ragdoll") RagdollPlayer(p);
+                    else if (actionType == "explode") ExplodePlayer(p);
+                    else if (actionType == "kick") KickPlayer(p);
+                    else if (actionType == "dump") DumpPlayerButt(p);
+
+                    count++;
+                }
+
+                string groupName = targetAgent ? "警卫组" : "走私犯组";
+                Plugin.LogSource.LogInfo($"[群控] 已向 {groupName} 中的 {count} 名玩家发送 {actionType} 指令。");
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.LogSource.LogError($"ExecuteGroupAction ({actionType}) 发生异常: " + ex.Message);
             }
         }
 
