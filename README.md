@@ -1,6 +1,7 @@
 # Airport Security Sucks Cheat
 
 基于 BepInEx 6 (IL2CPP) 框架与 Harmony 补丁构建的《Airport Security Sucks!》Demo 辅助工具。
+讲个笑话：我还是这个游戏的中文翻译贡献者
 
 ## 功能特性
 
